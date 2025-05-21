@@ -1,26 +1,37 @@
+from pathlib import Path
 import os
 import shutil
 import logging
 
 def maybe_create_dir(src_file, dest_file):
-    dest_dir = os.path.dirname(dest_file)
+    dest_dir = Path(dest_file).parent
     
-    if not os.path.exists(dest_dir):
+    if dest_dir.exists():
+        return
+    
+    dirs = []
+    src_dir, dir = Path(src_file).parent, dest_dir
+    
+    while not dir.exists():
+        dirs.append((src_dir, dir))
+        dir = dir.parent
+        src_dir = src_dir.parent
+        
+    while dirs:
+        src_dir, dir = dirs.pop()
         # Create directories in the destination
-        logging.info("Creating directory: %s", dest_dir)
-        os.makedirs(dest_dir, exist_ok=True)
-        logging.info("Created directory: %s", dest_dir)
+        logging.info("Creating directory: %s", dir)
+        dir.mkdir(parents=False)
+        logging.info("Created directory: %s", dir)
         # Set permissions for new directory
         try:
-            src_dir = os.path.dirname(src_file)
-            
             logging.debug("Getting permissions from source directory: %s", src_dir)
-            src_stat = os.stat(src_dir)
-            logging.debug("Setting permissions: [%s:%s] to %s", src_stat.st_uid, src_stat.st_gid, dest_dir)
-            os.chown(dest_dir, src_stat.st_uid, src_stat.st_gid)
-            logging.info("Set permissions [%s:%s] for destination directory: %s", src_stat.st_uid, src_stat.st_gid, dest_dir)
+            src_stat = src_dir.stat()
+            logging.debug("Setting permissions: [%s:%s] to %s", src_stat.st_uid, src_stat.st_gid, dir)
+            os.chown(dir, src_stat.st_uid, src_stat.st_gid)
+            logging.info("Set permissions [%s:%s] for destination directory: %s", src_stat.st_uid, src_stat.st_gid, dir)
         except PermissionError as e:
-            logging.error("Unable to set ownership for %s. %s", dest_dir, e)
+            logging.error("Unable to set ownership for %s. %s", dir, e)
                 
 def is_same_file(src_file: str, dest_file: str) -> bool:
     if not os.path.exists(dest_file):
