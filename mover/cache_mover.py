@@ -123,9 +123,6 @@ if __name__ == "__main__":
     logging.info(config)
     
     for mapping in config.mappings:
-        if not mapping.needs_moving():
-            continue
-        
         try:            
             startingtotal, startingused, startingfree = shutil.disk_usage(mapping.source)
             emptiedspace = migrate_files(mapping, config.dry_run)    

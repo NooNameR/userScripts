@@ -3,13 +3,11 @@
 mappings:
   # NOTE: for zfs you need to give dataset, not the disk
   # ZFS dataset -> Unraid Array
-  - source: "/mnt/data-cache/data"
+  - source: "/mnt/data-cache"
     # in case of unraid to move all to Array
-    destination: "/mnt/user0/data"
+    destination: "/mnt/user0"
     min_age: "35d"
     max_age: "1y"
-    # source usage threshold percents
-    threshold: 70
     # qbit clients
     clients:
       - host: localhost:8080
