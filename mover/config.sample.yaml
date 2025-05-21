@@ -1,22 +1,30 @@
 # config.yaml
 # List of source-destination pairs
 mappings:
-  - source: "/mnt/data-cache"
+  # NOTE: for zfs you need to give dataset, not the disk
+  # ZFS dataset -> Unraid Array
+  - source: "/mnt/data-cache/data"
     # in case of unraid to move all to Array
-    destination: "/mnt/user0"
+    destination: "/mnt/user0/data"
     min_age: "35d"
     max_age: "1y"
+    # source usage threshold percents
+    threshold: 70
     # qbit clients
     clients:
       - host: localhost:8080
         user: !ENV QBIT_USER
         password: !ENV QBIT_PASSWORD
-  - source: "/mnt/app-cache"
-    # ZFS dataset
-    destination: "/mnt/rusty"
+  # ZFS dataset -> ZFS dataset
+  - source: "/mnt/app-cache/documents"
+    destination: "/mnt/rusty/documents"
+    min_age: "3d"
+  # XFS cache -> Unraid Array 
+  - source: "/mnt/other-cache"
+    destination: "/mnt/user0"
     min_age: "3d"
     include:
-      - documents
+      - "photos"
 ignore:
   - "**/.Orphaned"
   - "**/.RecycleBin"
