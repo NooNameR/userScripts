@@ -48,7 +48,7 @@ def move_files(mapping, files: dict[str, str], inode_map: dict[int, set[str]]) -
     total = 0
     processed = set()
 
-    for src_file, dest_file in files.items():
+    for src_file, dest_file in sorted(files.items(), key=lambda item: os.stat(item[0]).st_mtime):
         # Check if the file is within the age range
         if not mapping.is_file_within_age_range(src_file):
             logging.debug("Skipping file (out of age range): %s", src_file)
