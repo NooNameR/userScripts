@@ -2,10 +2,11 @@ import pyaml_env
 import fnmatch
 import os
 import time
+import shutil
+import logging
 from .qbit_helper import QbitHelper
 from datetime import timedelta
 from pytimeparse2 import parse
-
 
 class Config:
     def __init__(self, path='config.yaml'):
@@ -21,6 +22,7 @@ class Config:
             self.now,
             source = m["source"],
             destination = m["destination"],
+            threshold = m.get("threshold", 0.0),
             min_age = parse(m["min_age"]),
             max_age = parse(m.get("max_age")) if m.get("max_age") else float('inf'),
             includes = set(m.get("include", ["/"])),
@@ -40,15 +42,27 @@ class Config:
         return "\n".join(out)
 
 class MovingMapping:   
-    def __init__(self, now, source: str, destination: str, min_age: int, max_age: int, includes: set[str], clients: list[QbitHelper], ignores: set[str]):
+    def __init__(self, now, source: str, destination: str, threshold: float, min_age: int, max_age: int, includes: set[str], clients: list[QbitHelper], ignores: set[str]):
         self.source = source
         self.destination = destination
         self.includes = [os.path.join(source, include.lstrip(os.sep)).rstrip(os.sep) for include in includes if include]
+        self.threshold = threshold
         self.clients = clients
         self.min_age = min_age
         self.max_age = max_age
         self.now = now
         self.ignores = ignores
+        
+    def needs_moving(self) -> bool:
+        total, used, _ = shutil.disk_usage(self.source)
+        percent_used = round((used / total) * 100, 4)
+        
+        if percent_used >= self.threshold:
+            logging.info("Starting space usage: %.4f is above moving threshold: %.4f. Starting %s...", percent_used, self.threshold, self.source)
+            return True
+        
+        logging.info("Starting space usage: %.4f is below moving threshold: %.4f. Skipping %s...", percent_used, self.threshold, self.source)
+        return False
         
     def pause(self, path: str):
         for qbit in self.clients:
@@ -71,6 +85,7 @@ class MovingMapping:
             f"Mapping:\n"
             f"       Source: {self.source}\n"
             f"       Destination: {self.destination}\n"
+            f"       Threshold: {self.threshold:.4f}%\n"
             f"       Includes: {self.includes}\n"
             f"       Age range: {timedelta(seconds=self.min_age)} – {"..." if self.max_age == float('inf') else timedelta(seconds=self.max_age)}\n"
             f"       Clients: [{", ".join([str(helper) for helper in self.clients])}]"

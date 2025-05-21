@@ -43,7 +43,6 @@ def migrate_files(mapping: MovingMapping, is_dry_run: bool) -> int:
         delete_empty_dirs(mapping, path)
     
     return total
-    
 
 def move_files(mapping, files: dict[str, str], inode_map: dict[int, set[str]]) -> int:
     total = 0
@@ -124,9 +123,12 @@ if __name__ == "__main__":
     logging.info(config)
     
     for mapping in config.mappings:
-        try:
+        if not mapping.needs_moving():
+            continue
+        
+        try:            
             startingtotal, startingused, startingfree = shutil.disk_usage(mapping.source)
-            emptiedspace = migrate_files(mapping, config.dry_run)
+            emptiedspace = migrate_files(mapping, config.dry_run)    
             _, _, ending_free = shutil.disk_usage(mapping.source)
             logging.info("Migration and hardlink recreation completed successfully from '%s' to '%s'", mapping.source, mapping.destination)
             logging.info("Starting free space: %s -- Ending free space: %s", helpers.format_bytes_to_gib(startingfree), helpers.format_bytes_to_gib(ending_free))
