@@ -15,32 +15,31 @@ logging.basicConfig(
         
 def migrate_files(mapping: MovingMapping, is_dry_run: bool) -> int:
     total = 0
-    for path in mapping.includes:
-        inodes_map = defaultdict(set)
-        files_to_move = {}
-        logging.info("Scanning %s...", path)
+    inodes_map = defaultdict(set)
+    files_to_move = {}
+    logging.info("Scanning %s...", mapping.source)
+    
+    for root, dirs, files in os.walk(mapping.source):
+        dirs.sort()
+        # Determine relative path from source to current directory
+        rel_path = os.path.relpath(root, mapping.source)
+        dest_dir = os.path.join(mapping.destination, rel_path)
         
-        for root, dirs, files in os.walk(path):
-            dirs.sort()
-            # Determine relative path from source to current directory
-            rel_path = os.path.relpath(root, mapping.source)
-            dest_dir = os.path.join(mapping.destination, rel_path)
+        for file in files:
+            src_file = os.path.join(root, file)
+            dest_file = os.path.join(dest_dir, file)
             
-            for file in files:
-                src_file = os.path.join(root, file)
-                dest_file = os.path.join(dest_dir, file)
-                
-                # Get the inode of the source file
-                inode = helpers.get_stat(src_file).st_ino
+            # Get the inode of the source file
+            inode = helpers.get_stat(src_file).st_ino
 
-                files_to_move[src_file] = dest_file    
-                inodes_map[inode].add(src_file)
-        
-        if is_dry_run:
-            continue
-        
-        total += move_files(mapping, files_to_move, inodes_map)
-        delete_empty_dirs(mapping, path)
+            files_to_move[src_file] = dest_file    
+            inodes_map[inode].add(src_file)
+    
+    if is_dry_run:
+        return 0
+    
+    total += move_files(mapping, files_to_move, inodes_map)
+    delete_empty_dirs(mapping, mapping.source)
     
     return total
 
@@ -133,6 +132,9 @@ if __name__ == "__main__":
     logging.info(config)
     
     for mapping in config.mappings:
+        if not mapping.needs_moving():
+            continue
+        
         try:            
             startingtotal, startingused, startingfree = shutil.disk_usage(mapping.source)
             emptiedspace = migrate_files(mapping, config.dry_run)    

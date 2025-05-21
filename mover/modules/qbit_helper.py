@@ -4,8 +4,8 @@ import logging
 from functools import cached_property
 
 class QbitHelper:
-    def __init__(self, root: str, host: str, user: str, password: str):
-        self.root = root
+    def __init__(self, rewrite: dict[str, str], host: str, user: str, password: str):
+        self.rewrite = rewrite
         self.host = host
         self.user = user
         self.password = password
@@ -36,11 +36,15 @@ class QbitHelper:
             return self.torrents
         
         self.torrents = self.__filter(self.__client.torrents.info(status_filter="completed", sort="added_on", reverse=True))
-        logging.info(f"Found %d torrents in the source: %s directory", len(self.torrents), self.root)
+        logging.debug(f"Found %d torrents", len(self.torrents))
         return self.torrents
     
     def __cache_path(self, torrent) -> str:
-        return os.path.join(self.root, torrent.content_path.lstrip(os.sep))
+        content_path = torrent.content_path
+        if self.rewrite and "from" in self.rewrite and "to" in self.rewrite:
+            content_path = content_path.replace(self.rewrite["from"], self.rewrite["to"])
+        
+        return content_path
             
     def __filter(self, torrents):
         result = []

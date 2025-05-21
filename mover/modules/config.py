@@ -25,8 +25,7 @@ class Config:
             threshold = m.get("threshold", 0.0),
             min_age = parse(m.get("min_age")) if m.get("min_age") else 0,
             max_age = parse(m.get("max_age")) if m.get("max_age") else float('inf'),
-            includes = set(m.get("include", ["/"])),
-            clients = [qbit_helper.QbitHelper(m["source"], **client) for client in m.get("clients", [])],
+            clients = [qbit_helper.QbitHelper(**client) for client in m.get("clients", [])],
             ignores= self.ignores
         )
     
@@ -42,10 +41,9 @@ class Config:
         return "\n".join(out)
 
 class MovingMapping:   
-    def __init__(self, now, source: str, destination: str, threshold: float, min_age: int, max_age: int, includes: set[str], clients: list[qbit_helper.QbitHelper], ignores: set[str]):
+    def __init__(self, now, source: str, destination: str, threshold: float, min_age: int, max_age: int, clients: list[qbit_helper.QbitHelper], ignores: set[str]):
         self.source = source
         self.destination = destination
-        self.includes = [os.path.join(source, include.lstrip(os.sep)).rstrip(os.sep) for include in includes if include]
         self.threshold = threshold
         self.clients = clients
         self.min_age = min_age
@@ -91,7 +89,6 @@ class MovingMapping:
             f"       Source: {self.source}\n"
             f"       Destination: {self.destination}\n"
             f"       Threshold: {self.threshold:.4f}%\n"
-            f"       Includes: {self.includes}\n"
             f"       Age range: {timedelta(seconds=self.min_age)} – {"..." if self.max_age == float('inf') else timedelta(seconds=self.max_age)}\n"
             f"       Clients: [{", ".join([str(helper) for helper in self.clients])}]"
         )
