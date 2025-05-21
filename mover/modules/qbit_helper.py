@@ -66,7 +66,7 @@ class QbitHelper:
         return os.path.samefile(content_path, path)
         
     def pause(self, path: str):
-        for torrent in self.__torrents:
+        for torrent in self.__torrents():
            if self.__has_file(torrent, path):
                logging.info("[%s] Pausing torrent: %s [%d] -> %s", torrent.hash, torrent.name, torrent.added_on, torrent.content_path)
                torrent.pause()
