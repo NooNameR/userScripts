@@ -58,10 +58,10 @@ class MovingMapping:
         percent_used = round((used / total) * 100, 4)
         
         if percent_used >= self.threshold:
-            logging.info("Starting space usage: %.4f is above moving threshold: %.4f. Starting %s...", percent_used, self.threshold, self.source)
+            logging.info("Starting space usage: %.4g%% is above moving threshold: %.4g%%. Starting %s...", percent_used, self.threshold, self.source)
             return True
         
-        logging.info("Starting space usage: %.4f is below moving threshold: %.4f. Skipping %s...", percent_used, self.threshold, self.source)
+        logging.info("Starting space usage: %.4g%% is below moving threshold: %.4g%%. Skipping %s...", percent_used, self.threshold, self.source)
         return False
         
     def pause(self, path: str):
@@ -85,7 +85,7 @@ class MovingMapping:
             f"Mapping:\n"
             f"       Source: {self.source}\n"
             f"       Destination: {self.destination}\n"
-            f"       Threshold: {self.threshold:.4f}%\n"
+            f"       Threshold: {self.threshold:.4g}%\n"
             f"       Includes: {self.includes}\n"
             f"       Age range: {timedelta(seconds=self.min_age)} – {"..." if self.max_age == float('inf') else timedelta(seconds=self.max_age)}\n"
             f"       Clients: [{", ".join([str(helper) for helper in self.clients])}]"
