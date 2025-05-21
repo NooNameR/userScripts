@@ -16,6 +16,7 @@ logging.basicConfig(
 def migrate_files(mapping: MovingMapping, is_dry_run: bool) -> int:
     total = 0
     for path in mapping.includes:
+        src_stats = {}
         inodes_map = defaultdict(set)
         files_to_move = {}
         logging.info("Scanning %s...", path)
@@ -39,16 +40,16 @@ def migrate_files(mapping: MovingMapping, is_dry_run: bool) -> int:
         if is_dry_run:
             continue
         
-        total += move_files(mapping, files_to_move, inodes_map)
+        total += move_files(mapping, files_to_move, inodes_map, src_stats)
         delete_empty_dirs(mapping, path)
     
     return total
 
-def move_files(mapping, files: dict[str, str], inode_map: dict[int, set[str]]) -> int:
+def move_files(mapping, files: dict[str, str], inode_map: dict[int, set[str]], src_stats: dict[str, os.stat_result]) -> int:
     total = 0
     processed = set()
 
-    for src_file, dest_file in sorted(files.items(), key=lambda item: helpers.get_stat(item[0]).st_mtime):
+    for src_file, dest_file in sorted(files.items(), key=lambda item: (src_stats[item[0]].st_mtime, len(inode_map.get(item[0], [])))):
         # Check if the file is within the age range
         if not mapping.is_file_within_age_range(src_file):
             logging.debug("Skipping file (out of age range): %s", src_file)
