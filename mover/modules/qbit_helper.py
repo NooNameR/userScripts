@@ -8,17 +8,15 @@ class QbitHelper:
         self.rewrite = rewrite
         self.host = host
         self.user = user
-        self.rewriter = self._make_rewriter(rewrite)
+        if rewrite and "from" in rewrite and "to" in rewrite:
+            src, dst = rewrite["from"], rewrite["to"]
+            self.rewriter = lambda path: path.replace(src, dst, 1)
+        else:
+            self.rewriter = lambda path: path  # no-op
         self.password = password
         self.torrents = []
         self.paused_torrents = []
         
-    def _make_rewriter(self, rewrite: dict[str, str] | None):
-        if rewrite and "from" in rewrite and "to" in rewrite:
-            return lambda path: path  # no-op
-        src, dst = rewrite["from"], rewrite["to"]
-        return lambda path: path.replace(src, dst, 1)
-    
     @cached_property
     def __client(self):
         try:
