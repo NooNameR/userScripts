@@ -44,11 +44,16 @@ def migrate_files(mapping: MovingMapping, is_dry_run: bool) -> int:
     
     return total
 
+def sort_func(key: str, inode_map: dict[int, set[str]]) -> int:
+    stat = helpers.get_stat(key)
+    return (stat.st_mtime, len(inode_map.get(stat.st_ino, [])))
+    
+
 def move_files(mapping, files: dict[str, str], inode_map: dict[int, set[str]]) -> int:
     total = 0
     processed = set()
 
-    for src_file, dest_file in sorted(files.items(), key = lambda item: (helpers.get_stat(item[0]).st_mtime, len(inode_map.get(item[0], [])))):
+    for src_file, dest_file in sorted(files.items(), key = lambda item: sort_func(item[0], inode_map)):
         # Check if the file is within the age range
         if not mapping.needs_moving():
             logging.debug("Stopping mover, source: %s is below the threshold", mapping.source)
