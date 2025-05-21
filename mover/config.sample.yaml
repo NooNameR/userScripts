@@ -1,8 +1,8 @@
 # config.yaml
 # List of source-destination pairs
 mappings:
-  # NOTE: for zfs you need to give dataset, not the disk
-  # ZFS dataset -> Unraid Array
+  # NOTE: disk usage for ZFS works on dataset level only
+  # ZFS dataset -> Unraid Array folder
   - source: "/mnt/data-cache/data"
     # in case of unraid to move all to Array
     destination: "/mnt/user0/data"
@@ -13,11 +13,11 @@ mappings:
       - host: localhost:8080
         user: !ENV QBIT_USER
         password: !ENV QBIT_PASSWORD
-        # we need to be able to match host path for container path
+        # we need to be able to match host path with container path
         rewrite:
           # container mount point for qbit
           from: "/data"
-          # host path
+          # host path on source
           to: "/mnt/data-cache/data"
   # ZFS dataset -> ZFS dataset
   - source: "/mnt/app-cache/documents"

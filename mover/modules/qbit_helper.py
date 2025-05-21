@@ -4,13 +4,20 @@ import logging
 from functools import cached_property
 
 class QbitHelper:
-    def __init__(self, rewrite: dict[str, str], host: str, user: str, password: str):
+    def __init__(self, rewrite: dict[str, str] | None, host: str, user: str, password: str):
         self.rewrite = rewrite
         self.host = host
         self.user = user
+        self.rewriter = self._make_rewriter(rewrite)
         self.password = password
         self.torrents = []
         self.paused_torrents = []
+        
+    def _make_rewriter(self, rewrite: dict[str, str] | None):
+        if rewrite and "from" in rewrite and "to" in rewrite:
+            return lambda path: path  # no-op
+        src, dst = rewrite["from"], rewrite["to"]
+        return lambda path: path.replace(src, dst, 1)
     
     @cached_property
     def __client(self):
@@ -40,11 +47,7 @@ class QbitHelper:
         return self.torrents
     
     def __cache_path(self, torrent) -> str:
-        content_path = torrent.content_path
-        if self.rewrite and "from" in self.rewrite and "to" in self.rewrite:
-            content_path = content_path.replace(self.rewrite["from"], self.rewrite["to"])
-        
-        return content_path
+        return self.rewriter(torrent.content_path)
             
     def __filter(self, torrents):
         result = []
