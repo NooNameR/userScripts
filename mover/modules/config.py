@@ -23,7 +23,7 @@ class Config:
             source = m["source"],
             destination = m["destination"],
             threshold = m.get("threshold", 0.0),
-            min_age = parse(m["min_age"]),
+            min_age = parse(m.get("min_age")) if m.get("min_age") else 0,
             max_age = parse(m.get("max_age")) if m.get("max_age") else float('inf'),
             includes = set(m.get("include", ["/"])),
             clients = [qbit_helper.QbitHelper(m["source"], **client) for client in m.get("clients", [])],
@@ -58,11 +58,16 @@ class MovingMapping:
         percent_used = round((used / total) * 100, 4)
         
         if percent_used >= self.threshold:
-            logging.info("Starting space usage: %.4g%% is above moving threshold: %.4g%%. Starting %s...", percent_used, self.threshold, self.source)
+            logging.debug("Starting space usage: %.4f is above moving threshold: %.4f. Starting %s...", percent_used, self.threshold, self.source)
             return True
         
-        logging.info("Starting space usage: %.4g%% is below moving threshold: %.4g%%. Skipping %s...", percent_used, self.threshold, self.source)
+        logging.info("Starting space usage: %.4f is below moving threshold: %.4f. Skipping %s...", percent_used, self.threshold, self.source)
         return False
+    
+    def is_file_within_age_range(self, file: str) -> bool:
+        file_mtime = helpers.get_stat(file).st_mtime
+        file_age = self.now - file_mtime
+        return self.min_age <= file_age <= self.max_age
         
     def pause(self, path: str):
         for qbit in self.clients:
@@ -85,7 +90,7 @@ class MovingMapping:
             f"Mapping:\n"
             f"       Source: {self.source}\n"
             f"       Destination: {self.destination}\n"
-            f"       Threshold: {self.threshold:.4g}%\n"
+            f"       Threshold: {self.threshold:.4f}%\n"
             f"       Includes: {self.includes}\n"
             f"       Age range: {timedelta(seconds=self.min_age)} – {"..." if self.max_age == float('inf') else timedelta(seconds=self.max_age)}\n"
             f"       Clients: [{", ".join([str(helper) for helper in self.clients])}]"

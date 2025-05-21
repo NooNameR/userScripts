@@ -43,6 +43,12 @@ def is_same_file(src_file: str, dest_file: str) -> bool:
     dest_stat = get_stat(dest_file)
     return src_stat.st_size == dest_stat.st_size
 
+def get_stat(file: str) -> os.stat_result:
+    if file in _stat_cache:
+        return _stat_cache[file]
+    _stat_cache[file] = os.stat(file)
+    return _stat_cache[file]
+
 def copy_file_with_metadata(src_file: str, dest_file: str):
     try:
         logging.info("Copying: %s -> %s", src_file, dest_file)
