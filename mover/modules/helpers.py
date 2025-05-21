@@ -3,6 +3,8 @@ import os
 import shutil
 import logging
 
+_stat_cache = {}
+
 def maybe_create_dir(src_file, dest_file):
     dest_dir = Path(dest_file).parent
     
@@ -37,15 +39,15 @@ def is_same_file(src_file: str, dest_file: str) -> bool:
     if not os.path.exists(dest_file):
         return False
     
-    src_stat = os.stat(src_file)
-    dest_stat = os.stat(dest_file)
+    src_stat = get_stat(src_file)
+    dest_stat = get_stat(dest_file)
     return src_stat.st_size == dest_stat.st_size
 
 def copy_file_with_metadata(src_file: str, dest_file: str):
     try:
         logging.info("Copying: %s -> %s", src_file, dest_file)
         shutil.copy2(src_file, dest_file)
-        src_stat = os.stat(src_file)
+        src_stat = get_stat(src_file)
         os.chown(dest_file, src_stat.st_uid, src_stat.st_gid)
         logging.info("Copied: %s -> %s", src_file, dest_file)
     except PermissionError as e:
@@ -71,3 +73,8 @@ def delete_file(path: str) -> int:
 def format_bytes_to_gib(size_bytes: int) -> str:
     gib = size_bytes / (1024 ** 3)
     return f"{gib:.2f} GiB"
+
+def get_stat(file: str) -> os.stat_result:
+    if file not in _stat_cache:
+        _stat_cache[file] = os.stat(file)
+    return _stat_cache[file]

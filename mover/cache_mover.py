@@ -31,7 +31,7 @@ def migrate_files(mapping: MovingMapping, is_dry_run: bool) -> int:
                 dest_file = os.path.join(dest_dir, file)
                 
                 # Get the inode of the source file
-                inode = os.stat(src_file).st_ino
+                inode = helpers.get_stat(src_file).st_ino
 
                 files_to_move[src_file] = dest_file    
                 inodes_map[inode].add(src_file)
@@ -48,7 +48,7 @@ def move_files(mapping, files: dict[str, str], inode_map: dict[int, set[str]]) -
     total = 0
     processed = set()
 
-    for src_file, dest_file in sorted(files.items(), key=lambda item: os.stat(item[0]).st_mtime):
+    for src_file, dest_file in sorted(files.items(), key=lambda item: helpers.get_stat(item[0]).st_mtime):
         # Check if the file is within the age range
         if not mapping.is_file_within_age_range(src_file):
             logging.debug("Skipping file (out of age range): %s", src_file)
@@ -64,7 +64,7 @@ def move_files(mapping, files: dict[str, str], inode_map: dict[int, set[str]]) -
             continue
         
         mapping.pause(src_file)
-        inode = os.stat(src_file).st_ino
+        inode = helpers.get_stat(src_file).st_ino
         # Skip if the file already exists in the destination with the same size
         if helpers.is_same_file(src_file, dest_file):
             logging.info("Skipping existing file: %s", dest_file)

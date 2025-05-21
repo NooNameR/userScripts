@@ -4,7 +4,7 @@ import os
 import time
 import shutil
 import logging
-from .qbit_helper import QbitHelper
+from . import helpers, qbit_helper
 from datetime import timedelta
 from pytimeparse2 import parse
 
@@ -26,7 +26,7 @@ class Config:
             min_age = parse(m["min_age"]),
             max_age = parse(m.get("max_age")) if m.get("max_age") else float('inf'),
             includes = set(m.get("include", ["/"])),
-            clients = [QbitHelper(m["source"], **client) for client in m.get("clients", [])],
+            clients = [qbit_helper.QbitHelper(m["source"], **client) for client in m.get("clients", [])],
             ignores= self.ignores
         )
     
@@ -42,7 +42,7 @@ class Config:
         return "\n".join(out)
 
 class MovingMapping:   
-    def __init__(self, now, source: str, destination: str, threshold: float, min_age: int, max_age: int, includes: set[str], clients: list[QbitHelper], ignores: set[str]):
+    def __init__(self, now, source: str, destination: str, threshold: float, min_age: int, max_age: int, includes: set[str], clients: list[qbit_helper.QbitHelper], ignores: set[str]):
         self.source = source
         self.destination = destination
         self.includes = [os.path.join(source, include.lstrip(os.sep)).rstrip(os.sep) for include in includes if include]
@@ -76,7 +76,7 @@ class MovingMapping:
         return any(fnmatch.fnmatch(path, pattern) for pattern in self.ignores)
     
     def is_file_within_age_range(self, filepath: str) -> bool:
-        file_mtime = os.stat(filepath).st_mtime
+        file_mtime = helpers.get_stat(filepath).st_mtime
         file_age = self.now - file_mtime
         return self.min_age <= file_age <= self.max_age
     
