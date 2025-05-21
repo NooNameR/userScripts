@@ -8,6 +8,11 @@ mappings:
     destination: "/mnt/user0/data"
     min_age: "35d"
     max_age: "1y"
+    # keep mover running until threshold is reached.
+    # It is going to prioritize files matching min_age -> with less links -> based on mtime
+    # Careful with min_age usage as it will prevent files from being moved if file is younger than that, but disk usage is higher
+    # Ideally min_age can be set to 1d, but files are gonna be sorted as explained above
+    threshold: 70
     # qbit clients
     clients:
       - host: localhost:8080
