@@ -30,7 +30,6 @@ class PlexHelper:
         plex = self.__plex
         
         def __populate_watched(item):
-            paths = set()
             for media in item.media:
                 for part in media.parts:
                     path = self.rewriter(part.file)

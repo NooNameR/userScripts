@@ -65,7 +65,7 @@ class MovingMapping:
         return False
     
     def is_file_within_age_range(self, file: str) -> bool:
-        file_mtime = helpers.get_stat(file).st_mtime
+        file_mtime = helpers.get_file_age(file)
         file_age = self.now - file_mtime
         return self.min_age <= file_age <= self.max_age
     
@@ -97,8 +97,7 @@ class MovingMapping:
         return any(fnmatch.fnmatch(path, pattern) for pattern in self.ignores)
     
     def is_file_within_age_range(self, filepath: str) -> bool:
-        file_mtime = helpers.get_stat(filepath).st_mtime
-        file_age = self.now - file_mtime
+        file_age = self.now - helpers.get_file_age(filepath)
         return self.min_age <= file_age <= self.max_age
     
     def __str__(self):

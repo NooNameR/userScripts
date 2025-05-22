@@ -2,8 +2,10 @@ from pathlib import Path
 import os
 import shutil
 import logging
+import subprocess
 
 _stat_cache = {}
+_age_cache = {}
 
 def maybe_create_dir(src_file, dest_file):
     dest_dir = Path(dest_file).parent
@@ -79,6 +81,31 @@ def delete_file(path: str) -> int:
 def format_bytes_to_gib(size_bytes: int) -> str:
     gib = size_bytes / (1024 ** 3)
     return f"{gib:.2f} GiB"
+
+def get_file_age(file: str) -> float:
+    if file not in _age_cache:
+        stat = get_stat(file)
+        _age_cache[file] = (
+            getattr(stat, 'st_birthtime', None)
+            or __get_birthtime(file)
+            or stat.st_ctime
+        )
+    return _age_cache[file]
+
+def __get_birthtime(filepath):
+    """
+    Get the creation (birth) time of a file from ZFS using GNU stat.
+    Returns epoch timestamp or None if unavailable.
+    """
+    try:
+        result = subprocess.run(["stat", "--format=%W", filepath], capture_output=True, text=True)
+        timestamp = int(result.stdout.strip())
+        if timestamp <= 0:
+            return None
+        return timestamp
+    except Exception as e:
+        logging.error(f"Error getting birthtime for %s: %s", filepath, e)
+        return None
 
 def get_stat(file: str) -> os.stat_result:
     if file not in _stat_cache:
