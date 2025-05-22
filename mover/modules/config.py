@@ -4,7 +4,7 @@ import os
 import time
 import shutil
 import logging
-from . import helpers, qbit_helper
+from . import helpers, qbit_helper, plex_helper
 from datetime import timedelta
 from pytimeparse2 import parse
 
@@ -26,6 +26,7 @@ class Config:
             min_age = parse(m.get("min_age")) if m.get("min_age") else 0,
             max_age = parse(m.get("max_age")) if m.get("max_age") else float('inf'),
             clients = [qbit_helper.QbitHelper(**client) for client in m.get("clients", [])],
+            plex = [plex_helper.PlexHelper(**client) for client in m.get("plex", [])],
             ignores= self.ignores
         )
     
@@ -41,11 +42,12 @@ class Config:
         return "\n".join(out)
 
 class MovingMapping:   
-    def __init__(self, now, source: str, destination: str, threshold: float, min_age: int, max_age: int, clients: list[qbit_helper.QbitHelper], ignores: set[str]):
+    def __init__(self, now, source: str, destination: str, threshold: float, min_age: int, max_age: int, clients: list[qbit_helper.QbitHelper], plex: list[plex_helper.PlexHelper], ignores: set[str]):
         self.source = source
         self.destination = destination
         self.threshold = threshold
         self.clients = clients
+        self.plex = plex
         self.min_age = min_age
         self.max_age = max_age
         self.now = now
@@ -74,6 +76,12 @@ class MovingMapping:
     def resume(self):
         for qbit in self.clients:
             qbit.resume()
+            
+    def is_watched(self, file: str) -> bool:
+        for plex in self.plex:
+            if plex.is_watched(file):
+                return True
+        return False
         
     def is_ignored(self, path: str) -> bool:
         return any(fnmatch.fnmatch(path, pattern) for pattern in self.ignores)
@@ -90,5 +98,6 @@ class MovingMapping:
             f"       Destination: {self.destination}\n"
             f"       Threshold: {self.threshold:.4f}%\n"
             f"       Age range: {timedelta(seconds=self.min_age)} – {"..." if self.max_age == float('inf') else timedelta(seconds=self.max_age)}\n"
-            f"       Clients: [{", ".join([str(helper) for helper in self.clients])}]"
+            f"       Clients: [{", ".join([str(helper) for helper in self.clients])}]\n"
+            f"       Plex: [{", ".join([str(helper) for helper in self.plex])}]"
         )

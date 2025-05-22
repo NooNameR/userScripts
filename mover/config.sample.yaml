@@ -9,7 +9,7 @@ mappings:
     min_age: "35d"
     max_age: "1y"
     # keep mover running until threshold is reached.
-    # It is going to prioritize files matching min_age -> with less links -> based on mtime
+    # It is going to prioritize files matching min_age -> with less links -> plex watched -> based on mtime
     # Careful with min_age usage as it will prevent files from being moved if file is younger than that, but disk usage is higher
     # Ideally min_age can be set to 1d, but files are gonna be sorted as explained above
     threshold: 70
@@ -18,6 +18,15 @@ mappings:
       - host: localhost:8080
         user: !ENV QBIT_USER
         password: !ENV QBIT_PASSWORD
+        # we need to be able to match host path with container path
+        rewrite:
+          # container mount point for qbit
+          from: "/data"
+          # host path on source
+          to: "/mnt/data-cache/data"
+    plex:
+      - url: http://localhost:32400
+        token: "<your-plex-token>"
         # we need to be able to match host path with container path
         rewrite:
           # container mount point for qbit
