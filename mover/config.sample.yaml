@@ -26,7 +26,7 @@ mappings:
           to: "/mnt/data-cache/data"
     plex:
       - url: http://localhost:32400
-        token: "<your-plex-token>"
+        token: !ENV PLEX_TOKEN
         # we need to be able to match host path with container path
         rewrite:
           # container mount point for qbit
