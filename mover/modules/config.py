@@ -68,6 +68,10 @@ class MovingMapping:
         file_mtime = helpers.get_stat(file).st_mtime
         file_age = self.now - file_mtime
         return self.min_age <= file_age <= self.max_age
+    
+    def get_dest_file(self, src_path: str) -> str:
+        rel_path = os.path.relpath(src_path, self.source)
+        return os.path.join(self.destination, rel_path)
         
     def pause(self, path: str):
         for qbit in self.clients:

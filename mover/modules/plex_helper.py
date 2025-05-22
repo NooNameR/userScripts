@@ -28,27 +28,25 @@ class PlexHelper:
     @cached_property
     def watched_media(self):
         watched = set()
+        
+        def __populate_watched(item):
+            for media in item.media:
+                for part in media.parts:
+                    path = self.rewriter(part.file)
+                    if os.path.exists(path):
+                        logging.debug("Watched %s: %s (%s)", item.type, item.title, path)
+                        watched.add(path)
             
         for section in self.__plex.library.sections():
             if section.type not in {'movie', 'show'}:
                 continue
             
-            for item in section.search(unwatched=False):
-                if section.type == 'movie':
-                    for media in item.media:
-                        for mediapart in media.parts:
-                            path = self.rewriter(mediapart.file)
-                            if os.path.exists(path):
-                                logging.debug("Marking movie: %s (%s) as watched", item.title, path)
-                                watched.add(path)
+            for item in section.search(unwatched=False):            
+                if item.type == 'movie':
+                    __populate_watched(item)
                 elif section.type == 'show':
                     for episode in item.episodes():
-                        for media in episode.media:
-                            for mediapart in media.parts:
-                                path = self.rewriter(mediapart.file)
-                                if os.path.exists(path):
-                                    logging.debug("Marking episode: %s (%s) as watched", episode.title, path)
-                                    watched.add(path)
+                       __populate_watched(episode)
                                     
         return watched
                         
