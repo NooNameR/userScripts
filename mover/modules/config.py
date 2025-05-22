@@ -23,7 +23,7 @@ class Config:
             source = m["source"],
             destination = m["destination"],
             threshold = m.get("threshold", 0.0),
-            min_age = parse(m.get("min_age")) if m.get("min_age") else 0,
+            min_age = parse(m.get("min_age", "2h")),
             max_age = parse(m.get("max_age")) if m.get("max_age") else float('inf'),
             clients = [qbit_helper.QbitHelper(**client) for client in m.get("clients", [])],
             plex = [plex_helper.PlexHelper(**client) for client in m.get("plex", [])],
