@@ -86,6 +86,12 @@ class MovingMapping:
             if plex.is_watched(file):
                 return True
         return False
+    
+    def is_active(self, file: str) -> bool:
+        for plex in self.plex:
+            if plex.is_active(file):
+                return True
+        return False
         
     def is_ignored(self, path: str) -> bool:
         return any(fnmatch.fnmatch(path, pattern) for pattern in self.ignores)

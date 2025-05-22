@@ -4,10 +4,9 @@ import logging
 from functools import cached_property
 
 class PlexHelper:
-    def __init__(self, url, token, rewrite = {}, users: set[str] = set()):
+    def __init__(self, url, token, rewrite = {}):
         self.url = url
         self.token = token
-        self.users = users
         if rewrite and "from" in rewrite and "to" in rewrite:
             src, dst = rewrite["from"], rewrite["to"]
             self.rewriter = lambda path: path.replace(src, dst, 1)
@@ -28,8 +27,10 @@ class PlexHelper:
     @cached_property
     def watched_media(self):
         watched = set()
+        plex = self.__plex
         
         def __populate_watched(item):
+            paths = set()
             for media in item.media:
                 for part in media.parts:
                     path = self.rewriter(part.file)
@@ -37,7 +38,7 @@ class PlexHelper:
                         logging.debug("Watched %s: %s (%s)", item.type, item.title, path)
                         watched.add(path)
             
-        for section in self.__plex.library.sections():
+        for section in plex.library.sections():
             if section.type not in {'movie', 'show'}:
                 continue
             
@@ -47,9 +48,25 @@ class PlexHelper:
                 elif section.type == 'show':
                     for episode in item.episodes():
                        __populate_watched(episode)
+                       
+        logging.info("Found %d watched items in the plex library", len(watched))
                                     
         return watched
-                        
+    
+    def is_active(self, file: str) -> bool:
+        for session in self.__plex.sessions():
+            item = self.__plex.library.fetchItem(session.ratingKey)
+            for media in item.media:
+                for part in media.parts:
+                    if not part.file:
+                        continue
+
+                    path = self.rewriter(part.file)
+                    if os.path.exists(path) and os.path.samefile(file):
+                        return True
+        
+        return False
+
     def is_watched(self, file: str) -> bool:
         return file in self.watched_media
     

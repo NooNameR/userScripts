@@ -70,6 +70,10 @@ def move_files(mapping, files: set[str], inode_map: dict[int, set[str]]) -> int:
             logging.debug("File was already processed: %s", src_file)
             continue
         
+        if mapping.is_active(src_file):
+            logging.info("File is currently being played on Plex: %s", src_file)
+            continue
+        
         mapping.pause(src_file)
         
         dest_file = mapping.get_dest_file(src_file)
