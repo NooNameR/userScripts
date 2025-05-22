@@ -47,7 +47,8 @@ def sort_func(mapping, key: str, value: str, inode_map: dict[int, set[str]]) -> 
     stat = helpers.get_stat(key)
     age_priority = 0 if mapping.is_file_within_age_range(key) else 1
     hardlinks = len(inode_map.get(stat.st_ino, []))
-    return (age_priority, hardlinks, stat.st_mtime)
+    is_watched = 0 if mapping.is_watched(key) else 1
+    return (age_priority, hardlinks, is_watched, stat.st_mtime)
     
 
 def move_files(mapping, files: dict[str, str], inode_map: dict[int, set[str]]) -> int:

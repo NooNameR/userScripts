@@ -4,7 +4,7 @@ import logging
 from functools import cached_property
 
 class QbitHelper:
-    def __init__(self, rewrite: dict[str, str] | None, host: str, user: str, password: str):
+    def __init__(self, host: str, user: str, password: str, rewrite: dict[str, str]={}):
         self.rewrite = rewrite
         self.host = host
         self.user = user
