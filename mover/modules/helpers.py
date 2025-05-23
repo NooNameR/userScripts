@@ -3,6 +3,7 @@ import os
 import shutil
 import logging
 import subprocess
+from datetime import datetime
 
 _stat_cache = {}
 _age_cache = {}
@@ -53,7 +54,7 @@ def get_stat(file: str) -> os.stat_result:
 
 def copy_file_with_metadata(src_file: str, dest_file: str):
     try:
-        logging.info("Copying: %s -> %s", src_file, dest_file)
+        logging.info("[%s] Copying: %s -> %s", get_age_str(src_file), src_file, dest_file)
         shutil.copy2(src_file, dest_file)
         src_stat = get_stat(src_file)
         os.chown(dest_file, src_stat.st_uid, src_stat.st_gid)
@@ -70,7 +71,7 @@ def link_file(src_file: str, dest_file: str):
 def delete_file(path: str) -> int:   
     try:
         size = os.path.getsize(path)
-        logging.debug("Deleting file: %s", path)
+        logging.debug("[%s] Deleting file: %s", get_age_str(path), path)
         os.remove(path)
         logging.info("Deleted file: %s", path)
         return size
@@ -82,7 +83,7 @@ def format_bytes_to_gib(size_bytes: int) -> str:
     gib = size_bytes / (1024 ** 3)
     return f"{gib:.2f} GiB"
 
-def get_file_age(file: str) -> float:
+def get_ctime(file: str) -> float:
     if file not in _age_cache:
         stat = get_stat(file)
         _age_cache[file] = (
@@ -92,6 +93,11 @@ def get_file_age(file: str) -> float:
         )
     return _age_cache[file]
 
+def get_age_str(file: str) -> str:
+    created_dt = datetime.fromtimestamp(get_ctime(file))
+    now = datetime.now()
+    return f"{(now - created_dt).days}d"
+    
 def __get_birthtime(filepath):
     """
     Get the creation (birth) time of a file from ZFS using GNU stat.

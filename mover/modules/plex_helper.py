@@ -48,7 +48,7 @@ class PlexHelper:
                     for episode in item.episodes():
                        __populate_watched(episode)
                        
-        logging.info("Found %d watched items in the plex library", len(watched))
+        logging.info("Found %d watched files in the plex library", len(watched))
                                     
         return watched
     
