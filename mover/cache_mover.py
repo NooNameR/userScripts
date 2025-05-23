@@ -1,4 +1,5 @@
 import os
+import fcntl
 import shutil
 import sys
 import logging
@@ -12,6 +13,15 @@ logging.basicConfig(
     datefmt="%Y-%m-%d %H:%M:%S",
     handlers=[logging.StreamHandler(sys.stdout)],
 )
+
+lock_file_path = '/tmp/cache_mover.lock'
+lock_file = open(lock_file_path, 'w')
+
+try:
+    fcntl.flock(lock_file, fcntl.LOCK_EX | fcntl.LOCK_NB)
+except BlockingIOError:
+    logging.error("Another instance is already running.")
+    sys.exit()
         
 def migrate_files(mapping: MovingMapping, is_dry_run: bool) -> int:
     total = 0
