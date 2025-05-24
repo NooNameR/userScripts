@@ -3,6 +3,7 @@ import sys
 import logging
 from functools import cached_property
 from typing import Dict
+from .helpers import execute
 
 class QbitHelper:
     def __init__(self, host: str, user: str, password: str, rewrite: Dict[str, str] = {}):
@@ -75,7 +76,7 @@ class QbitHelper:
         for torrent in self.__torrents():
            if self.__has_file(torrent, path):
                logging.info("[%s] Pausing torrent: %s [%d] -> %s", torrent.hash, torrent.name, torrent.added_on, torrent.content_path)
-               torrent.pause()
+               execute(torrent.pause)
                self.paused_torrents.append(torrent)
         
         self.torrents = [t for t in self.torrents if t not in self.paused_torrents]
@@ -83,7 +84,7 @@ class QbitHelper:
     def resume(self):
         for torrent in self.paused_torrents:
             logging.info("[%s] Resuming torrent: %s [%d] -> %s", torrent.hash, torrent.name, torrent.added_on, torrent.content_path)
-            torrent.resume()
+            execute(torrent.resume)
 
     def __str__(self):
         return self.host

@@ -43,7 +43,7 @@ def maybe_create_dir(src_file: str, dest_file: str) -> None:
         # Set permissions for new directory
         try:
            logging.info("Creating directory: %s", dir)
-           __execute(create_dir)
+           execute(create_dir)
            logging.info("Created directory: %s", dir)
         except PermissionError as e:
             logging.error("Unable to set ownership for %s. %s", dir, e)
@@ -66,7 +66,7 @@ def copy_file_with_metadata(src_file: str, dest_file: str) -> None:
     
     try:
         logging.info("[%s] Copying: %s -> %s", get_age_str(src_file), src_file, dest_file)
-        __execute(copy)
+        execute(copy)
         logging.info("Copied: %s -> %s", src_file, dest_file)
     except PermissionError as e:
         logging.error("Unable to preserve ownership for %s. Requires elevated privileges. %s", dest_file, e)
@@ -76,14 +76,14 @@ def link_file(link_file: str, src_file: str, dest_file: str):
     
      # If inode is already processed, create a hard link
     logging.info("Hardlinking: %s -> %s", link_file, dest_file)
-    __execute(lambda: os.link(link_file, dest_file))
+    execute(lambda: os.link(link_file, dest_file))
     logging.info("Hardlinked: %s -> %s", link_file, dest_file)
     
 def delete_file(path: str) -> None:   
     try:
         logging.debug("[%s] Deleting file: %s", get_age_str(path), path)
         
-        __execute(lambda: os.remove(path))
+        execute(lambda: os.remove(path))
         logging.info("Deleted file: %s", path)
     except Exception as e:
         logging.error("Failed to delete %s: %s", path, e)
@@ -99,7 +99,7 @@ def delete_empty_dirs(root: str, is_ignored: Callable[[str], bool]) -> None:
             
             if not os.listdir(dir_path):  # Directory is empty
                 logging.debug("Removing empty directory: %s", dir_path)
-                __execute(lambda: os.rmdir(dir_path))
+                execute(lambda: os.rmdir(dir_path))
                 logging.info("Removed empty directory: %s", dir_path)
 
 def format_bytes_to_gib(size_bytes: int) -> str:
@@ -141,6 +141,6 @@ def get_stat(file: str) -> os.stat_result:
         _stat_cache[file] = os.stat(file)
     return _stat_cache[file]
 
-def __execute(callable: Callable[[], None]) -> None:
+def execute(callable: Callable[[], None]) -> None:
     if not _dry_run:
         callable()

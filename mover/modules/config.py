@@ -4,7 +4,9 @@ import os
 import time
 import shutil
 import logging
-from . import helpers, qbit_helper, plex_helper
+from .plex_helper import PlexHelper
+from .qbit_helper import QbitHelper
+from .helpers import get_ctime
 from datetime import timedelta
 from pytimeparse2 import parse
 
@@ -24,8 +26,8 @@ class Config:
             threshold = m.get("threshold", 0.0),
             min_age = parse(m.get("min_age", "2h")),
             max_age = parse(m.get("max_age")) if m.get("max_age") else float('inf'),
-            clients = [qbit_helper.QbitHelper(**client) for client in m.get("clients", [])],
-            plex = [plex_helper.PlexHelper(**client) for client in m.get("plex", [])],
+            clients = [QbitHelper(**client) for client in m.get("clients", [])],
+            plex = [PlexHelper(**client) for client in m.get("plex", [])],
             ignores= self.ignores
         )
     
@@ -40,7 +42,7 @@ class Config:
         return "\n".join(out)
 
 class MovingMapping:   
-    def __init__(self, now, source: str, destination: str, threshold: float, min_age: int, max_age: int, clients: list[qbit_helper.QbitHelper], plex: list[plex_helper.PlexHelper], ignores: set[str]):
+    def __init__(self, now, source: str, destination: str, threshold: float, min_age: int, max_age: int, clients: list[QbitHelper], plex: list[PlexHelper], ignores: set[str]):
         self.source = source
         self.destination = destination
         self.threshold = threshold
@@ -61,11 +63,6 @@ class MovingMapping:
         
         logging.info("Space usage: %.4g%% is below moving threshold: %.4g%%. Skipping %s...", percent_used, self.threshold, self.source)
         return False
-    
-    def is_file_within_age_range(self, file: str) -> bool:
-        file_mtime = helpers.get_ctime(file)
-        file_age = self.now - file_mtime
-        return self.min_age <= file_age <= self.max_age
     
     def get_dest_file(self, src_path: str) -> str:
         rel_path = os.path.relpath(src_path, self.source)
@@ -95,7 +92,7 @@ class MovingMapping:
         return any(fnmatch.fnmatch(path, pattern) for pattern in self.ignores)
     
     def is_file_within_age_range(self, filepath: str) -> bool:
-        file_age = self.now - helpers.get_ctime(filepath)
+        file_age = self.now - get_ctime(filepath)
         return self.min_age <= file_age <= self.max_age
     
     def __str__(self) -> str:
