@@ -3,12 +3,13 @@ import os
 import shutil
 import logging
 import subprocess
+from typing import Dict
 from datetime import datetime
 
-_stat_cache = {}
-_age_cache = {}
+_stat_cache: Dict[str, os.stat_result] = {}
+_age_cache: Dict[str, float] = {}
 
-def maybe_create_dir(src_file, dest_file):
+def maybe_create_dir(src_file: str, dest_file: str) -> None:
     dest_dir = Path(dest_file).parent
     
     if dest_dir.exists():
@@ -52,7 +53,7 @@ def get_stat(file: str) -> os.stat_result:
     _stat_cache[file] = os.stat(file)
     return _stat_cache[file]
 
-def copy_file_with_metadata(src_file: str, dest_file: str):
+def copy_file_with_metadata(src_file: str, dest_file: str) -> None:
     try:
         logging.info("[%s] Copying: %s -> %s", get_age_str(src_file), src_file, dest_file)
         shutil.copy2(src_file, dest_file)
@@ -98,14 +99,14 @@ def get_age_str(file: str) -> str:
     now = datetime.now()
     return f"{(now - created_dt).days}d"
     
-def __get_birthtime(filepath):
+def __get_birthtime(filepath) -> float:
     """
     Get the creation (birth) time of a file from ZFS using GNU stat.
     Returns epoch timestamp or None if unavailable.
     """
     try:
         result = subprocess.run(["stat", "--format=%W", filepath], capture_output=True, text=True)
-        timestamp = int(result.stdout.strip())
+        timestamp = float(result.stdout.strip())
         if timestamp <= 0:
             return None
         return timestamp

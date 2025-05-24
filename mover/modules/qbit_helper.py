@@ -2,9 +2,10 @@ import os
 import sys
 import logging
 from functools import cached_property
+from typing import Dict
 
 class QbitHelper:
-    def __init__(self, host: str, user: str, password: str, rewrite: dict[str, str]={}):
+    def __init__(self, host: str, user: str, password: str, rewrite: Dict[str, str] = {}):
         self.rewrite = rewrite
         self.host = host
         self.user = user

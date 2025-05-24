@@ -1,10 +1,11 @@
 import sys
 import os
 import logging
+from typing import Any, Callable, Dict, Optional, Tuple, Union
 from functools import cached_property
 
 class PlexHelper:
-    def __init__(self, url, token, rewrite = {}):
+    def __init__(self, url: str, token: str, rewrite: Dict[str, str] = {}):
         self.url = url
         self.token = token
         if rewrite and "from" in rewrite and "to" in rewrite:

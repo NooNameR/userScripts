@@ -4,6 +4,7 @@ import shutil
 import sys
 import logging
 import modules.helpers as helpers
+from typing import Dict, Tuple
 from collections import defaultdict
 from modules.config import Config, MovingMapping
 
@@ -48,7 +49,7 @@ def migrate_files(mapping: MovingMapping, is_dry_run: bool) -> int:
     
     return total
 
-def sort_func(mapping, key: str, inode_map: dict[int, set[str]]) -> int:
+def sort_func(mapping, key: str, inode_map: Dict[int, set[str]]) -> Tuple[int, int, int, float]:
     stat = helpers.get_stat(key)
     age_priority = 0 if mapping.is_file_within_age_range(key) else 1
     hardlinks = len(inode_map.get(stat.st_ino, []))
@@ -56,7 +57,7 @@ def sort_func(mapping, key: str, inode_map: dict[int, set[str]]) -> int:
     return (age_priority, hardlinks, is_watched, helpers.get_ctime(key))
     
 
-def move_files(mapping, files: set[str], inode_map: dict[int, set[str]]) -> int:
+def move_files(mapping, files: set[str], inode_map: Dict[int, set[str]]) -> int:
     total = 0
     processed = set()
 
@@ -120,7 +121,7 @@ def move_files(mapping, files: set[str], inode_map: dict[int, set[str]]) -> int:
         
     return total
 
-def delete_empty_dirs(mapping: MovingMapping, dir: str):
+def delete_empty_dirs(mapping: MovingMapping, dir: str) -> None:
     # Remove empty directories
     for root, dirs, _ in os.walk(dir, topdown=False):
         for dir_ in dirs:

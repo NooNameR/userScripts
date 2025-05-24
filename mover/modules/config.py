@@ -30,7 +30,7 @@ class Config:
             ignores= self.ignores
         )
     
-    def __str__(self):
+    def __str__(self) -> str:
         out = [
             f"Config:",
             f"  Dry run: {self.dry_run}",
@@ -73,11 +73,11 @@ class MovingMapping:
         rel_path = os.path.relpath(src_path, self.source)
         return os.path.join(self.destination, rel_path)
         
-    def pause(self, path: str):
+    def pause(self, path: str) -> None:
         for qbit in self.clients:
             qbit.pause(path)
             
-    def resume(self):
+    def resume(self) -> None:
         for qbit in self.clients:
             qbit.resume()
             
@@ -100,7 +100,7 @@ class MovingMapping:
         file_age = self.now - helpers.get_ctime(filepath)
         return self.min_age <= file_age <= self.max_age
     
-    def __str__(self):
+    def __str__(self) -> str:
         return (
             f"Mapping:\n"
             f"       Source: {self.source}\n"
