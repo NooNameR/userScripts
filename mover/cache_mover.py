@@ -61,14 +61,8 @@ def move_files(mapping, files: set[str], inode_map: dict[int, set[str]]) -> int:
     processed = set()
 
     for src_file in sorted(files, key = lambda item: sort_func(mapping, item, inode_map)):
-        # Check if the file is within the age range
-        if not mapping.needs_moving():
-            logging.debug("Stopping mover, source: %s is below the threshold", mapping.source)
-            return total
-        
-        # Check if the file is within the age range
-        if not mapping.is_file_within_age_range(src_file):
-            logging.debug("Skipping file (out of age range): %s", src_file)
+        if src_file in processed:
+            logging.debug("File was already processed: %s", src_file)
             continue
         
         # Skip checking orphaned and recycled directories
@@ -76,12 +70,18 @@ def move_files(mapping, files: set[str], inode_map: dict[int, set[str]]) -> int:
             logging.debug("Skipping file: %s, matched ignored", src_file)
             continue
         
-        if src_file in processed:
-            logging.debug("File was already processed: %s", src_file)
+        # Check if the file is within the age range
+        if not mapping.is_file_within_age_range(src_file):
+            logging.debug("Skipping file (out of age range): %s", src_file)
             continue
         
+        # Check if the file is within the age range
+        if not mapping.needs_moving():
+            logging.debug("Stopping mover, source: %s is below the threshold", mapping.source)
+            return total
+        
         if mapping.is_active(src_file):
-            logging.info("File is currently being played on Plex: %s", src_file)
+            logging.info("Skipping file, currently is being played on Plex: %s", src_file)
             continue
         
         mapping.pause(src_file)
