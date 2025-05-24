@@ -9,13 +9,6 @@ from collections import defaultdict
 from modules.config import Config, MovingMapping
 
 lock_file_path = '/tmp/cache_mover.lock'
-lock_file = open(lock_file_path, 'w')
-
-try:
-    fcntl.flock(lock_file, fcntl.LOCK_EX | fcntl.LOCK_NB)
-except BlockingIOError:
-    logging.error("Another instance is already running.")
-    sys.exit()
         
 def migrate_files(mapping: MovingMapping, is_dry_run: bool) -> int:
     total = 0
@@ -38,7 +31,7 @@ def migrate_files(mapping: MovingMapping, is_dry_run: bool) -> int:
         return 0
     
     total += move_files(mapping, files_to_move, inodes_map)
-    delete_empty_dirs(mapping, mapping.source)
+    delete_empty_dirs(mapping)
     
     return total
 
@@ -114,9 +107,9 @@ def move_files(mapping, files: set[str], inode_map: Dict[int, set[str]]) -> int:
         
     return total
 
-def delete_empty_dirs(mapping: MovingMapping, dir: str) -> None:
+def delete_empty_dirs(mapping: MovingMapping) -> None:
     # Remove empty directories
-    for root, dirs, _ in os.walk(dir, topdown=False):
+    for root, dirs, _ in os.walk(mapping.source, topdown=False):
         for dir_ in dirs:
             dir_path = os.path.join(root, dir_)
             
@@ -132,36 +125,45 @@ if __name__ == "__main__":
     import argparse
     # Argument parsing
     parser = argparse.ArgumentParser(description="Migrate files and preserve hardlinks, only moving files within a specific age range. Deletes source files after successful migration.")
-    parser.add_argument("--config", type=str, help="Path to config yaml")
-    parser.add_argument("--log-level", type=str, help="Default logger level", choices=[l for l in logging._nameToLevel.keys()], default="INFO")
-
+    parser.add_argument("--config", type=str, help="Path to config yaml", required=True)
+    parser.add_argument("--dry-run", help="Dry-run mode", action="store_true", default=False)
+    parser.add_argument("--log-level", type=str, help="Default logger level", choices=list(logging._nameToLevel.keys()), default="INFO")
     args = parser.parse_args()
     
     logging.basicConfig(
         level=args.log_level,
-        format="%(asctime)s - %(levelname)s - %(message)s",
+        format=f"{("DRY-RUN: " if args.dry_run else "")}%(asctime)s - %(levelname)s - %(message)s",
         datefmt="%Y-%m-%d %H:%M:%S",
         handlers=[logging.StreamHandler(sys.stdout)],
     )
     
     config = Config(args.config)
-    
     logging.info(config)
+
+    lock_file = open(lock_file_path, 'w')
+    try:
+        fcntl.flock(lock_file, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except BlockingIOError:
+        logging.error("Another instance is already running.")
+        sys.exit()
     
-    for mapping in config.mappings:
-        if not mapping.needs_moving():
-            continue
-        
-        try:            
-            startingtotal, startingused, startingfree = shutil.disk_usage(mapping.source)
-            emptiedspace = migrate_files(mapping, config.dry_run)    
-            _, _, ending_free = shutil.disk_usage(mapping.source)
-            logging.info("Migration and hardlink recreation completed successfully from '%s' to '%s'", mapping.source, mapping.destination)
-            logging.info("Starting free space: %s -- Ending free space: %s", helpers.format_bytes_to_gib(startingfree), helpers.format_bytes_to_gib(ending_free))
-            logging.info("FREED UP %s TOTAL SPACE", helpers.format_bytes_to_gib(emptiedspace))
-        except IndexError as e:
-            logging.error("Error: %s", e, exc_info=True)
-        except Exception as e:
-            logging.error("Error: %s", e, exc_info=True)
-        finally:
-            mapping.resume()
+    try:
+        for mapping in config.mappings:
+            if not mapping.needs_moving():
+                continue
+            
+            try:            
+                startingtotal, startingused, startingfree = shutil.disk_usage(mapping.source)
+                emptiedspace = migrate_files(mapping, args.dry_run)    
+                _, _, ending_free = shutil.disk_usage(mapping.source)
+                logging.info("Migration and hardlink recreation completed successfully from '%s' to '%s'", mapping.source, mapping.destination)
+                logging.info("Starting free space: %s -- Ending free space: %s", helpers.format_bytes_to_gib(startingfree), helpers.format_bytes_to_gib(ending_free))
+                logging.info("FREED UP %s TOTAL SPACE", helpers.format_bytes_to_gib(emptiedspace))
+            except IndexError as e:
+                logging.error("Error: %s", e, exc_info=True)
+            except Exception as e:
+                logging.error("Error: %s", e, exc_info=True)
+            finally:
+                mapping.resume()
+    finally:
+        lock_file.close()

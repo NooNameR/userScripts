@@ -46,5 +46,3 @@ ignore:
   - "**/.RecycleBin"
   - "**/usenet/incomplete/**"
   - "**/torrents/**"
-# find files but do not move
-dry_run: true

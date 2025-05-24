@@ -14,7 +14,6 @@ class Config:
         self.raw = pyaml_env.parse_config(path)
     
         self.ignores = set(self.raw.get("ignore", []))
-        self.dry_run = self.raw.get("dry_run", True)
         self.mappings = [self.__parse_mapping(m) for m in self.raw.get("mappings", [])]
         
     def __parse_mapping(self, m) -> "MovingMapping":
@@ -33,7 +32,6 @@ class Config:
     def __str__(self) -> str:
         out = [
             f"Config:",
-            f"  Dry run: {self.dry_run}",
             f"  Ignore patterns: {self.ignores}",
             f"  Mappings:"
         ]
