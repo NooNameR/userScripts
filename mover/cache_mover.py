@@ -27,11 +27,9 @@ def migrate_files(mapping: MovingMapping, is_dry_run: bool) -> int:
             files_to_move.add(src_file)
             inodes_map[inode].add(src_file)
     
+    total += move_files(mapping, files_to_move, inodes_map, is_dry_run)
     if is_dry_run:
-        return 0
-    
-    total += move_files(mapping, files_to_move, inodes_map)
-    delete_empty_dirs(mapping)
+        delete_empty_dirs(mapping)
     
     return total
 
@@ -43,7 +41,7 @@ def sort_func(mapping, key: str, inode_map: Dict[int, set[str]]) -> Tuple[int, i
     return (age_priority, hardlinks, is_watched, helpers.get_ctime(key))
     
 
-def move_files(mapping, files: set[str], inode_map: Dict[int, set[str]]) -> int:
+def move_files(mapping, files: set[str], inode_map: Dict[int, set[str]], dry_run: bool) -> int:
     total = 0
     processed = set()
 
@@ -71,20 +69,25 @@ def move_files(mapping, files: set[str], inode_map: Dict[int, set[str]]) -> int:
             logging.info("Skipping file, currently is being played on Plex: %s", src_file)
             continue
         
+        stat = helpers.get_stat(src_file)
+        
+        if dry_run:
+            logging.info("Skipping file %s, with %d hardlinks", src_file, len(inode_map.get(stat.st_ino, set())))
+            total += stat.st_size
+            continue
+        
         mapping.pause(src_file)
         
         dest_file = mapping.get_dest_file(src_file)
-        inode = helpers.get_stat(src_file).st_ino
         # Skip if the file already exists in the destination with the same size
         if helpers.is_same_file(src_file, dest_file):
             logging.info("Skipping existing file: %s", dest_file)
         else:
-            helpers.maybe_create_dir(src_file, dest_file)
             helpers.copy_file_with_metadata(src_file, dest_file)
         
         processed.add(src_file)
         
-        for link_src_file in inode_map.get(inode, set()):
+        for link_src_file in inode_map.get(stat.st_ino, set()):
             if link_src_file in processed:
                 continue
             
@@ -95,15 +98,16 @@ def move_files(mapping, files: set[str], inode_map: Dict[int, set[str]]) -> int:
             else:
                 if os.path.exists(link_dest_file):
                     logging.warning("Destination file: %s is not the same as: %s. Deleting before re-linking", link_dest_file, link_src_file)
-                    total += helpers.delete_file(link_dest_file)
+                    helpers.delete_file(link_dest_file)
+                    total += helpers.get_stat(link_dest_file).st_size
                 
-                helpers.maybe_create_dir(link_src_file, link_dest_file)
-                helpers.link_file(dest_file, link_dest_file)
+                helpers.link_file(dest_file, link_src_file, link_dest_file)
             
             processed.add(link_src_file)
             helpers.delete_file(link_src_file)
                 
-        total += helpers.delete_file(src_file)
+        helpers.delete_file(src_file)
+        total += stat.st_size
         
     return total
 

@@ -54,6 +54,8 @@ def get_stat(file: str) -> os.stat_result:
     return _stat_cache[file]
 
 def copy_file_with_metadata(src_file: str, dest_file: str) -> None:
+    maybe_create_dir(src_file, dest_file)
+    
     try:
         logging.info("[%s] Copying: %s -> %s", get_age_str(src_file), src_file, dest_file)
         shutil.copy2(src_file, dest_file)
@@ -63,22 +65,21 @@ def copy_file_with_metadata(src_file: str, dest_file: str) -> None:
     except PermissionError as e:
         logging.error("Unable to preserve ownership for %s. Requires elevated privileges. %s", dest_file, e)
 
-def link_file(src_file: str, dest_file: str):
-     # If inode is already processed, create a hard link
-    logging.info("Hardlinking: %s -> %s", src_file, dest_file)
-    os.link(src_file, dest_file)                
-    logging.info("Hardlinked: %s -> %s", src_file, dest_file)
+def link_file(link_file: str, src_file: str, dest_file: str):
+    maybe_create_dir(src_file, dest_file)
     
-def delete_file(path: str) -> int:   
+     # If inode is already processed, create a hard link
+    logging.info("Hardlinking: %s -> %s", link_file, dest_file)
+    os.link(link_file, dest_file)                
+    logging.info("Hardlinked: %s -> %s", link_file, dest_file)
+    
+def delete_file(path: str) -> None:   
     try:
-        size = os.path.getsize(path)
         logging.debug("[%s] Deleting file: %s", get_age_str(path), path)
         os.remove(path)
         logging.info("Deleted file: %s", path)
-        return size
     except Exception as e:
         logging.error("Failed to delete %s: %s", path, e)
-    return 0
 
 def format_bytes_to_gib(size_bytes: int) -> str:
     gib = size_bytes / (1024 ** 3)
