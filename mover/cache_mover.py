@@ -8,13 +8,6 @@ from typing import Dict, Tuple
 from collections import defaultdict
 from modules.config import Config, MovingMapping
 
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s - %(levelname)s - %(message)s",
-    datefmt="%Y-%m-%d %H:%M:%S",
-    handlers=[logging.StreamHandler(sys.stdout)],
-)
-
 lock_file_path = '/tmp/cache_mover.lock'
 lock_file = open(lock_file_path, 'w')
 
@@ -139,9 +132,18 @@ if __name__ == "__main__":
     import argparse
     # Argument parsing
     parser = argparse.ArgumentParser(description="Migrate files and preserve hardlinks, only moving files within a specific age range. Deletes source files after successful migration.")
-    parser.add_argument("--config", help="Path to config yaml")
+    parser.add_argument("--config", type=str, help="Path to config yaml")
+    parser.add_argument("--log-level", type=str, help="Default logger level", choices=[l for l in logging._nameToLevel.keys()], default="INFO")
 
     args = parser.parse_args()
+    
+    logging.basicConfig(
+        level=args.log_level,
+        format="%(asctime)s - %(levelname)s - %(message)s",
+        datefmt="%Y-%m-%d %H:%M:%S",
+        handlers=[logging.StreamHandler(sys.stdout)],
+    )
+    
     config = Config(args.config)
     
     logging.info(config)
