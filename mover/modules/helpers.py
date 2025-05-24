@@ -30,17 +30,21 @@ def maybe_create_dir(src_file: str, dest_file: str) -> None:
         
     while dirs:
         src_dir, dir = dirs.pop()
-        # Create directories in the destination
-        logging.info("Creating directory: %s", dir)
-        __execute(lambda: dir.mkdir(parents=False))
-        logging.info("Created directory: %s", dir)
-        # Set permissions for new directory
-        try:
+        
+        def create_dir():
+            dir.mkdir(parents=False)
+            # Set permissions for new directory
             logging.debug("Getting permissions from source directory: %s", src_dir)
             src_stat = src_dir.stat()
             logging.debug("Setting permissions: [%s:%s] to %s", src_stat.st_uid, src_stat.st_gid, dir)
-            __execute(lambda: os.chown(dir, src_stat.st_uid, src_stat.st_gid))
+            os.chown(dir, src_stat.st_uid, src_stat.st_gid)
             logging.info("Set permissions [%s:%s] for destination directory: %s", src_stat.st_uid, src_stat.st_gid, dir)
+        
+        # Set permissions for new directory
+        try:
+           logging.info("Creating directory: %s", dir)
+           __execute(create_dir)
+           logging.info("Created directory: %s", dir)
         except PermissionError as e:
             logging.error("Unable to set ownership for %s. %s", dir, e)
                 

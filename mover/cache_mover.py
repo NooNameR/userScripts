@@ -116,7 +116,7 @@ if __name__ == "__main__":
     
     logging.basicConfig(
         level=args.log_level,
-        format=f"{("DRY-RUN: " if args.dry_run else "")}%(asctime)s - %(levelname)s - %(message)s",
+        format=f"{("[DRY-RUN]: " if args.dry_run else "")}%(asctime)s - %(levelname)s - %(message)s",
         datefmt="%Y-%m-%d %H:%M:%S",
         handlers=[logging.StreamHandler(sys.stdout)],
     )
