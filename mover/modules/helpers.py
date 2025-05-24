@@ -3,11 +3,16 @@ import os
 import shutil
 import logging
 import subprocess
-from typing import Dict
+from typing import Dict, Callable
 from datetime import datetime
 
 _stat_cache: Dict[str, os.stat_result] = {}
 _age_cache: Dict[str, float] = {}
+_dry_run = False
+
+def set_dry_run(value: bool):
+    global _dry_run
+    _dry_run = value
 
 def maybe_create_dir(src_file: str, dest_file: str) -> None:
     dest_dir = Path(dest_file).parent
@@ -27,14 +32,14 @@ def maybe_create_dir(src_file: str, dest_file: str) -> None:
         src_dir, dir = dirs.pop()
         # Create directories in the destination
         logging.info("Creating directory: %s", dir)
-        dir.mkdir(parents=False)
+        __execute(lambda: dir.mkdir(parents=False))
         logging.info("Created directory: %s", dir)
         # Set permissions for new directory
         try:
             logging.debug("Getting permissions from source directory: %s", src_dir)
             src_stat = src_dir.stat()
             logging.debug("Setting permissions: [%s:%s] to %s", src_stat.st_uid, src_stat.st_gid, dir)
-            os.chown(dir, src_stat.st_uid, src_stat.st_gid)
+            __execute(lambda: os.chown(dir, src_stat.st_uid, src_stat.st_gid))
             logging.info("Set permissions [%s:%s] for destination directory: %s", src_stat.st_uid, src_stat.st_gid, dir)
         except PermissionError as e:
             logging.error("Unable to set ownership for %s. %s", dir, e)
@@ -47,20 +52,17 @@ def is_same_file(src_file: str, dest_file: str) -> bool:
     dest_stat = get_stat(dest_file)
     return src_stat.st_size == dest_stat.st_size
 
-def get_stat(file: str) -> os.stat_result:
-    if file in _stat_cache:
-        return _stat_cache[file]
-    _stat_cache[file] = os.stat(file)
-    return _stat_cache[file]
-
 def copy_file_with_metadata(src_file: str, dest_file: str) -> None:
     maybe_create_dir(src_file, dest_file)
     
-    try:
-        logging.info("[%s] Copying: %s -> %s", get_age_str(src_file), src_file, dest_file)
+    def copy():
         shutil.copy2(src_file, dest_file)
         src_stat = get_stat(src_file)
         os.chown(dest_file, src_stat.st_uid, src_stat.st_gid)
+    
+    try:
+        logging.info("[%s] Copying: %s -> %s", get_age_str(src_file), src_file, dest_file)
+        __execute(copy)
         logging.info("Copied: %s -> %s", src_file, dest_file)
     except PermissionError as e:
         logging.error("Unable to preserve ownership for %s. Requires elevated privileges. %s", dest_file, e)
@@ -70,16 +72,31 @@ def link_file(link_file: str, src_file: str, dest_file: str):
     
      # If inode is already processed, create a hard link
     logging.info("Hardlinking: %s -> %s", link_file, dest_file)
-    os.link(link_file, dest_file)                
+    __execute(lambda: os.link(link_file, dest_file))
     logging.info("Hardlinked: %s -> %s", link_file, dest_file)
     
 def delete_file(path: str) -> None:   
     try:
         logging.debug("[%s] Deleting file: %s", get_age_str(path), path)
-        os.remove(path)
+        
+        __execute(lambda: os.remove(path))
         logging.info("Deleted file: %s", path)
     except Exception as e:
         logging.error("Failed to delete %s: %s", path, e)
+        
+def delete_empty_dirs(root: str, is_ignored: Callable[[str], bool]) -> None:
+    # Remove empty directories
+    for root, dirs, _ in os.walk(root, topdown=False):
+        for dir_ in dirs:
+            dir_path = os.path.join(root, dir_)
+            
+            if is_ignored(dir_path):
+                continue
+            
+            if not os.listdir(dir_path):  # Directory is empty
+                logging.debug("Removing empty directory: %s", dir_path)
+                __execute(lambda: os.rmdir(dir_path))
+                logging.info("Removed empty directory: %s", dir_path)
 
 def format_bytes_to_gib(size_bytes: int) -> str:
     gib = size_bytes / (1024 ** 3)
@@ -119,3 +136,7 @@ def get_stat(file: str) -> os.stat_result:
     if file not in _stat_cache:
         _stat_cache[file] = os.stat(file)
     return _stat_cache[file]
+
+def __execute(callable: Callable[[], None]) -> None:
+    if not _dry_run:
+        callable()

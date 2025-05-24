@@ -10,7 +10,7 @@ from modules.config import Config, MovingMapping
 
 lock_file_path = '/tmp/cache_mover.lock'
         
-def migrate_files(mapping: MovingMapping, is_dry_run: bool) -> int:
+def migrate_files(mapping: MovingMapping) -> int:
     total = 0
     inodes_map = defaultdict(set)
     files_to_move = set()
@@ -27,9 +27,8 @@ def migrate_files(mapping: MovingMapping, is_dry_run: bool) -> int:
             files_to_move.add(src_file)
             inodes_map[inode].add(src_file)
     
-    total += move_files(mapping, files_to_move, inodes_map, is_dry_run)
-    if is_dry_run:
-        delete_empty_dirs(mapping)
+    total += move_files(mapping, files_to_move, inodes_map)
+    helpers.delete_empty_dirs(mapping.source, mapping.is_ignored)
     
     return total
 
@@ -41,7 +40,7 @@ def sort_func(mapping, key: str, inode_map: Dict[int, set[str]]) -> Tuple[int, i
     return (age_priority, hardlinks, is_watched, helpers.get_ctime(key))
     
 
-def move_files(mapping, files: set[str], inode_map: Dict[int, set[str]], dry_run: bool) -> int:
+def move_files(mapping, files: set[str], inode_map: Dict[int, set[str]]) -> int:
     total = 0
     processed = set()
 
@@ -70,11 +69,6 @@ def move_files(mapping, files: set[str], inode_map: Dict[int, set[str]], dry_run
             continue
         
         stat = helpers.get_stat(src_file)
-        
-        if dry_run:
-            logging.info("Skipping file %s, with %d hardlinks", src_file, len(inode_map.get(stat.st_ino, set())))
-            total += stat.st_size
-            continue
         
         mapping.pause(src_file)
         
@@ -110,20 +104,6 @@ def move_files(mapping, files: set[str], inode_map: Dict[int, set[str]], dry_run
         total += stat.st_size
         
     return total
-
-def delete_empty_dirs(mapping: MovingMapping) -> None:
-    # Remove empty directories
-    for root, dirs, _ in os.walk(mapping.source, topdown=False):
-        for dir_ in dirs:
-            dir_path = os.path.join(root, dir_)
-            
-            if mapping.is_ignored(dir_path):
-                continue
-            
-            if not os.listdir(dir_path):  # Directory is empty
-                logging.debug("Removing empty directory: %s", dir_path)
-                os.rmdir(dir_path)
-                logging.info("Removed empty directory: %s", dir_path)
                 
 if __name__ == "__main__":
     import argparse
@@ -140,6 +120,7 @@ if __name__ == "__main__":
         datefmt="%Y-%m-%d %H:%M:%S",
         handlers=[logging.StreamHandler(sys.stdout)],
     )
+    helpers.set_dry_run(args.dry_run)
     
     config = Config(args.config)
     logging.info(config)
@@ -158,7 +139,7 @@ if __name__ == "__main__":
             
             try:            
                 startingtotal, startingused, startingfree = shutil.disk_usage(mapping.source)
-                emptiedspace = migrate_files(mapping, args.dry_run)    
+                emptiedspace = migrate_files(mapping)    
                 _, _, ending_free = shutil.disk_usage(mapping.source)
                 logging.info("Migration and hardlink recreation completed successfully from '%s' to '%s'", mapping.source, mapping.destination)
                 logging.info("Starting free space: %s -- Ending free space: %s", helpers.format_bytes_to_gib(startingfree), helpers.format_bytes_to_gib(ending_free))
