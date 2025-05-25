@@ -24,7 +24,7 @@ class Config:
             source = m["source"],
             destination = m["destination"],
             threshold = m.get("threshold", 0.0),
-            cache_threshold = m.get("threshold", 0.0),
+            cache_threshold = m.get("cache_threshold", 0.0),
             min_age = parse(m.get("min_age", "2h")),
             max_age = parse(m.get("max_age")) if m.get("max_age") else float('inf'),
             clients = [QbitHelper(**client) for client in m.get("clients", [])],
@@ -70,7 +70,7 @@ class MovingMapping:
         total, used, _ = shutil.disk_usage(self.source)
         percent_used = round((used / total) * 100, 4)
         
-        if percent_used < self.cache_threshold:
+        if self.threshold > percent_used and percent_used <= self.cache_threshold:
             logging.debug("Space usage: %.4g%% is belowe cache threshold: %.4g%%. Starting %s...", percent_used, self.cache_threshold, self.source)
             return True
         
@@ -78,11 +78,11 @@ class MovingMapping:
         return False
     
     def eligible_for_cache(self) -> set[str]:
-        result = set()
+        result = []
         
         for file in [i for plex in self.plex for i in plex.continue_watching]:
             rel_path = os.path.relpath(file, self.source)
-            result.add(os.path.join(self.destination, rel_path))
+            result.append(os.path.join(self.destination, rel_path))
         
         return result
     
@@ -127,6 +127,7 @@ class MovingMapping:
             f"       Source: {self.source}\n"
             f"       Destination: {self.destination}\n"
             f"       Threshold: {self.threshold:.4g}%\n"
+            f"       Cache Threshold: {self.cache_threshold:.4g}%\n"
             f"       Age range: {timedelta(seconds=self.min_age)} – {"..." if self.max_age == float('inf') else timedelta(seconds=self.max_age)}\n"
             f"       Clients: [{", ".join([str(helper) for helper in self.clients])}]\n"
             f"       Plex: [{", ".join([str(helper) for helper in self.plex])}]"

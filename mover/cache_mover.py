@@ -115,8 +115,8 @@ def move_to_cache(mapping) -> int:
     if not mapping.can_move_to_cache():
         return total
     
-    files = mapping.eligible_for_cache()
-    inode_map = {helpers.get_stat(f).st_ino: set() for f in files}
+    files_to_move = mapping.eligible_for_cache()
+    inode_map = {helpers.get_stat(f).st_ino: set() for f in files_to_move}
     for root, dirs, files in os.walk(mapping.destination):
         dirs.sort()
                 
@@ -130,33 +130,39 @@ def move_to_cache(mapping) -> int:
             inode = helpers.get_stat(src_file).st_ino
             if inode in inode_map:
                 inode_map[inode].add(src_file)
-                
-    for src_file in files:
+    
+    processed = set()
+    for src_file in files_to_move:
+        if src_file in processed:
+            continue
+        
         if not mapping.can_move_to_cache():
             break
         
         stat = helpers.get_stat(src_file)
-        dest_file = mapping.get_cache_file(file)
+        dest_file = mapping.get_cache_file(src_file)
         
-        mapping.pause(src_file)
         if helpers.is_same_file(src_file, dest_file):
             logging.info("Skipping existing file: %s", dest_file)
         else:
             helpers.copy_file_with_metadata(src_file, dest_file)
             
+        processed.add(src_file)
+            
         for link_src_file in inode_map.get(stat.st_ino, set()):
+            if link_src_file in processed:
+                continue
+            
             link_dest_file = mapping.get_cache_file(link_src_file)
-            mapping.pause(link_src_file)
             if helpers.is_same_file(link_src_file, link_dest_file):
                 logging.info("Skipping existing file: %s", link_dest_file)
             else:
                 if os.path.exists(link_dest_file):
-                    link_dest_stat = helpers.get_stat(link_dest_file)
-                    logging.warning("Destination file: %s is not the same as: %s. Deleting before re-linking", link_dest_file, link_src_file)
-                    helpers.delete_file(link_dest_file)
-                    total -= link_dest_stat.st_size
-                
-                helpers.link_file(dest_file, link_src_file, link_dest_file)
+                    logging.warning("Destination file: %s is not the same as: %s. Skipping...", link_dest_file, link_src_file)
+                else:
+                    helpers.link_file(dest_file, link_src_file, link_dest_file)
+                    
+            processed.add(link_src_file)
                 
         total += stat.st_size
     

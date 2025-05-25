@@ -2,6 +2,7 @@ import sys
 import os
 import logging
 from typing import Dict
+from datetime import datetime, timedelta
 from functools import cached_property
 
 class PlexHelper:
@@ -54,8 +55,8 @@ class PlexHelper:
         return watched
     
     def is_active(self, file: str) -> bool:
-        for session in self.__plex.sessions():
-            item = self.__plex.library.fetchItem(session.ratingKey)
+        for ratingKey in self.__active_items():
+            item = self.__plex.library.fetchItem(ratingKey)
             for media in item.media:
                 for part in media.parts:
                     if not part.file:
@@ -66,42 +67,48 @@ class PlexHelper:
                         return True
         
         return False
+    
+    def __active_items(self) -> set[str]:
+        result = set()
+        for session in self.__plex.sessions():
+            result.add(session.ratingKey)
+        
+        return result
 
     def is_watched(self, file: str) -> bool:
         return file in self.watched_media
     
     @cached_property
     def continue_watching(self) -> set[str]:
-        result = set()
+        result = []
+        cutoff = datetime.now() - timedelta(weeks=2)
         
         def __populate_watching(item):
-            total = 0
             for media in item.media:
                 for part in media.parts:
                     path = self.rewriter(part.file)
                     if not os.path.exists(path):
                         logging.debug("Watching not on cache %s: %s (%s)", item.type, item.title, path)
-                        result.add(path)
-                        total += 1
-            return total
+                        result.append(path)
         
+        active_items = self.__active_items()
         for item in sorted(self.__plex.continueWatching(), key=lambda i: i.lastViewedAt or 0, reverse=True):
+            if not item.lastViewedAt or item.lastViewedAt < cutoff:
+                logging.info("Item: %s last watched at %s (cutoff: %s) — skipping...", item.title, item.lastViewedAt or "?", cutoff)
+                continue
+            
             if item.type == 'movie':
                 __populate_watching(item)
             elif item.type == 'episode':
                 show = item.show()
-                remaining = 5
-                key = (item.seasonNumber, item.index) if item.isWatched else (item.seasonNumber, item.index -1)
+                key = (item.seasonNumber, item.index) if item.isWatched and item.ratingKey in active_items else (item.seasonNumber, item.index -1)
                 for episode in sorted([e for e in show.episodes() if (e.seasonNumber, e.index) > key], key=lambda e: (e.seasonNumber, e.index)):                    
-                    if not remaining:
-                        break
-                    
                     if episode.seasonNumber < item.seasonNumber and episode.index < item.index:
                         continue
-                    if __populate_watching(episode):
-                        remaining -= 1
+                    
+                    __populate_watching(episode)
                         
-        logging.info("Found %d watching files in the plex library", len(result))
+        logging.info("Detected %d watching files not currently available on cache drives in Plex library", len(result))
                     
         return result
     
