@@ -15,27 +15,14 @@ class Config:
         self.now = time.time()
         self.raw = pyaml_env.parse_config(path)
     
-        self.ignores = set(self.raw.get("ignore", []))
         self.mappings = [self.__parse_mapping(m) for m in self.raw.get("mappings", [])]
         
     def __parse_mapping(self, m) -> "MovingMapping":
-        return MovingMapping(
-            self.now,
-            source = m["source"],
-            destination = m["destination"],
-            threshold = m.get("threshold", 0.0),
-            cache_threshold = m.get("cache_threshold", 0.0),
-            min_age = parse(m.get("min_age", "2h")),
-            max_age = parse(m.get("max_age")) if m.get("max_age") else float('inf'),
-            clients = [QbitHelper(**client) for client in m.get("clients", [])],
-            plex = [PlexHelper(**client) for client in m.get("plex", [])],
-            ignores= self.ignores
-        )
+        return MovingMapping(self.now, m)
     
     def __str__(self) -> str:
         out = [
             f"Config:",
-            f"  Ignore patterns: {self.ignores}",
             f"  Mappings:"
         ]
         for i, mapping in enumerate(self.mappings, 1):
@@ -43,17 +30,17 @@ class Config:
         return "\n".join(out)
 
 class MovingMapping:   
-    def __init__(self, now, source: str, destination: str, threshold: float, cache_threshold: float, min_age: int, max_age: int, clients: list[QbitHelper], plex: list[PlexHelper], ignores: set[str]):
-        self.source = source
-        self.destination = destination
-        self.threshold = threshold
-        self.cache_threshold = cache_threshold
-        self.clients = clients
-        self.plex = plex
-        self.min_age = min_age
-        self.max_age = max_age
+    def __init__(self, now, raw):
         self.now = now
-        self.ignores = ignores
+        self.source = raw["source"]
+        self.destination = raw["destination"]
+        self.threshold = raw.get("threshold", 0.0)
+        self.cache_threshold = raw.get("cache_threshold", 0.0)
+        self.min_age = parse(raw.get("min_age", "2h"))
+        self.max_age = parse(raw.get("max_age")) if raw.get("max_age") else float('inf')
+        self.clients = [QbitHelper(**client) for client in raw.get("clients", [])]
+        self.plex = [PlexHelper(**client) for client in raw.get("plex", [])]
+        self.ignores = set(raw.get("ignore", []))
         
     def needs_moving(self) -> bool:
         total, used, _ = shutil.disk_usage(self.source)
@@ -66,18 +53,18 @@ class MovingMapping:
         logging.info("Space usage: %.4g%% is below moving threshold: %.4g%%. Skipping %s...", percent_used, self.threshold, self.source)
         return False
     
-    def can_move_to_cache(self) -> bool:
+    def can_move_to_source(self) -> bool:
         total, used, _ = shutil.disk_usage(self.source)
         percent_used = round((used / total) * 100, 4)
         
-        if self.threshold > percent_used and percent_used <= self.cache_threshold:
+        if percent_used <= self.cache_threshold:
             logging.debug("Space usage: %.4g%% is belowe cache threshold: %.4g%%. Starting %s...", percent_used, self.cache_threshold, self.source)
             return True
         
         logging.info("Space usage: %.4g%% is above cache threshold: %.4g%%. Skipping %s...", percent_used, self.cache_threshold, self.source)
         return False
     
-    def eligible_for_cache(self) -> set[str]:
+    def eligible_for_source(self) -> set[str]:
         result = []
         
         for file in [i for plex in self.plex for i in plex.continue_watching]:
@@ -86,7 +73,7 @@ class MovingMapping:
         
         return result
     
-    def get_cache_file(self, path: str) -> str:
+    def get_src_file(self, path: str) -> str:
         rel_path = os.path.relpath(path, self.destination)
         return os.path.join(self.source, rel_path)
         
@@ -115,6 +102,9 @@ class MovingMapping:
         return False
         
     def is_ignored(self, path: str) -> bool:
+        if not self.ignores:
+            return False
+        
         return any(fnmatch.fnmatch(path, pattern) for pattern in self.ignores)
     
     def is_file_within_age_range(self, filepath: str) -> bool:
@@ -129,6 +119,7 @@ class MovingMapping:
             f"       Threshold: {self.threshold:.4g}%\n"
             f"       Cache Threshold: {self.cache_threshold:.4g}%\n"
             f"       Age range: {timedelta(seconds=self.min_age)} – {"..." if self.max_age == float('inf') else timedelta(seconds=self.max_age)}\n"
-            f"       Clients: [{", ".join([str(helper) for helper in self.clients])}]\n"
-            f"       Plex: [{", ".join([str(helper) for helper in self.plex])}]"
+            f"       Clients: [{', '.join(map(str, self.clients))}]\n"
+            f"       Plex: [{', '.join(map(str, self.plex))}]\n"
+            f"       Ignore patterns: {self.ignores}"
         )

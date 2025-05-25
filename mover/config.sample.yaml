@@ -36,6 +36,11 @@ mappings:
           from: "/data"
           # host path on source
           to: "/mnt/data-cache/data"
+    ignore:
+      - "**/.Orphaned"
+      - "**/.RecycleBin"
+      - "**/usenet/incomplete/**"
+      - "**/torrents/**"
   # ZFS dataset -> ZFS dataset
   - source: "/mnt/app-cache/documents"
     destination: "/mnt/rusty/documents"
@@ -44,8 +49,3 @@ mappings:
   - source: "/mnt/other-cache/share1"
     destination: "/mnt/user0/share1"
     min_age: "3d"
-ignore:
-  - "**/.Orphaned"
-  - "**/.RecycleBin"
-  - "**/usenet/incomplete/**"
-  - "**/torrents/**"
