@@ -101,13 +101,18 @@ class PlexHelper:
             if item.type == 'movie':
                 __populate_watching(item)
             elif item.type == 'episode':
+                remaining = 25
                 show = item.show()
                 key = (item.seasonNumber, item.index) if item.isWatched and item.ratingKey in active_items else (item.seasonNumber, item.index -1)
                 for episode in sorted([e for e in show.episodes() if (e.seasonNumber, e.index) > key], key=lambda e: (e.seasonNumber, e.index)):                    
                     if episode.seasonNumber < item.seasonNumber and episode.index < item.index:
                         continue
                     
+                    if not remaining:
+                        break
+                    
                     __populate_watching(episode)
+                    remaining -= 1
         
         logging.info("Detected %d watching files not currently available on source drives in Plex library", len(result))
                     
