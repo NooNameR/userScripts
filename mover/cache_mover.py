@@ -202,11 +202,13 @@ if __name__ == "__main__":
         for mapping in config.mappings:
             try:            
                 startingtotal, startingused, startingfree = shutil.disk_usage(mapping.source)
-                emptiedspace = migrate_files(mapping) - move_to_cache(mapping)
+                emptiedspace = migrate_files(mapping)
+                moved_to_cache = move_to_cache(mapping)
                 _, _, ending_free = shutil.disk_usage(mapping.source)
                 logging.info("Migration and hardlink recreation completed successfully from '%s' to '%s'", mapping.source, mapping.destination)
                 logging.info("Starting free space: %s -- Ending free space: %s", helpers.format_bytes_to_gib(startingfree), helpers.format_bytes_to_gib(ending_free))
                 logging.info("FREED UP %s TOTAL SPACE", helpers.format_bytes_to_gib(emptiedspace))
+                logging.info("MOVED BACK TO CACHE %s", helpers.format_bytes_to_gib(moved_to_cache))
             except IndexError as e:
                 logging.error("Error: %s", e, exc_info=True)
             except Exception as e:
