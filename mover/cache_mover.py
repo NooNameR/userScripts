@@ -12,15 +12,24 @@ lock_file_path = '/tmp/cache_mover.lock'
         
 def migrate_files(mapping: MovingMapping) -> int:
     total = 0
+    
+    if not mapping.needs_moving():
+        logging.debug("Stopping mover, source: %s is below the threshold", mapping.source)
+        return total
+    
     inodes_map = defaultdict(set)
     files_to_move = set()
     logging.info("Scanning %s...", mapping.source)
     
     for root, dirs, files in os.walk(mapping.source):
         dirs.sort()
-                
+
         for file in files:
             src_file = os.path.join(root, file)
+            
+            if mapping.is_ignored(src_file):
+                continue
+            
             # Get the inode of the source file
             inode = helpers.get_stat(src_file).st_ino
 
@@ -49,11 +58,6 @@ def move_files(mapping, files: set[str], inode_map: Dict[int, set[str]]) -> int:
             logging.debug("File was already processed: %s", src_file)
             continue
         
-        # Skip checking orphaned and recycled directories
-        if mapping.is_ignored(src_file):
-            logging.debug("Skipping file: %s, matched ignored", src_file)
-            continue
-        
         # Check if the file is within the age range
         if not mapping.is_file_within_age_range(src_file):
             logging.debug("Skipping file (out of age range): %s", src_file)
@@ -62,14 +66,14 @@ def move_files(mapping, files: set[str], inode_map: Dict[int, set[str]]) -> int:
         # Check if the file is within the age range
         if not mapping.needs_moving():
             logging.debug("Stopping mover, source: %s is below the threshold", mapping.source)
-            return total
+            break
         
         if mapping.is_active(src_file):
             logging.info("Skipping file, currently is being played on Plex: %s", src_file)
             continue
         
         stat = helpers.get_stat(src_file)
-        
+    
         mapping.pause(src_file)
         
         dest_file = mapping.get_dest_file(src_file)
@@ -91,9 +95,10 @@ def move_files(mapping, files: set[str], inode_map: Dict[int, set[str]]) -> int:
                 logging.info("Skipping existing file: %s", link_dest_file)
             else:
                 if os.path.exists(link_dest_file):
+                    link_dest_stat = helpers.get_stat(link_dest_file)
                     logging.warning("Destination file: %s is not the same as: %s. Deleting before re-linking", link_dest_file, link_src_file)
                     helpers.delete_file(link_dest_file)
-                    total += helpers.get_stat(link_dest_file).st_size
+                    total += link_dest_stat.st_size
                 
                 helpers.link_file(dest_file, link_src_file, link_dest_file)
             
@@ -103,6 +108,58 @@ def move_files(mapping, files: set[str], inode_map: Dict[int, set[str]]) -> int:
         helpers.delete_file(src_file)
         total += stat.st_size
         
+    return total
+
+def move_to_cache(mapping) -> int:
+    total = 0
+    if not mapping.can_move_to_cache():
+        return total
+    
+    files = mapping.eligible_for_cache()
+    inode_map = {helpers.get_stat(f).st_ino: set() for f in files}
+    for root, dirs, files in os.walk(mapping.destination):
+        dirs.sort()
+                
+        for file in files:
+            src_file = os.path.join(root, file)
+            
+            if mapping.is_ignored(src_file):
+                continue
+            
+            # Get the inode of the source file
+            inode = helpers.get_stat(src_file).st_ino
+            if inode in inode_map:
+                inode_map[inode].add(src_file)
+                
+    for src_file in files:
+        if not mapping.can_move_to_cache():
+            break
+        
+        stat = helpers.get_stat(src_file)
+        dest_file = mapping.get_cache_file(file)
+        
+        mapping.pause(src_file)
+        if helpers.is_same_file(src_file, dest_file):
+            logging.info("Skipping existing file: %s", dest_file)
+        else:
+            helpers.copy_file_with_metadata(src_file, dest_file)
+            
+        for link_src_file in inode_map.get(stat.st_ino, set()):
+            link_dest_file = mapping.get_cache_file(link_src_file)
+            mapping.pause(link_src_file)
+            if helpers.is_same_file(link_src_file, link_dest_file):
+                logging.info("Skipping existing file: %s", link_dest_file)
+            else:
+                if os.path.exists(link_dest_file):
+                    link_dest_stat = helpers.get_stat(link_dest_file)
+                    logging.warning("Destination file: %s is not the same as: %s. Deleting before re-linking", link_dest_file, link_src_file)
+                    helpers.delete_file(link_dest_file)
+                    total -= link_dest_stat.st_size
+                
+                helpers.link_file(dest_file, link_src_file, link_dest_file)
+                
+        total += stat.st_size
+    
     return total
                 
 if __name__ == "__main__":
@@ -134,12 +191,9 @@ if __name__ == "__main__":
     
     try:
         for mapping in config.mappings:
-            if not mapping.needs_moving():
-                continue
-            
             try:            
                 startingtotal, startingused, startingfree = shutil.disk_usage(mapping.source)
-                emptiedspace = migrate_files(mapping)    
+                emptiedspace = migrate_files(mapping) - move_to_cache(mapping)
                 _, _, ending_free = shutil.disk_usage(mapping.source)
                 logging.info("Migration and hardlink recreation completed successfully from '%s' to '%s'", mapping.source, mapping.destination)
                 logging.info("Starting free space: %s -- Ending free space: %s", helpers.format_bytes_to_gib(startingfree), helpers.format_bytes_to_gib(ending_free))

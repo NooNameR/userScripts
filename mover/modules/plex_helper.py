@@ -62,7 +62,7 @@ class PlexHelper:
                         continue
 
                     path = self.rewriter(part.file)
-                    if os.path.exists(path) and os.path.samefile(file):
+                    if os.path.exists(path) and os.path.samefile(path, file):
                         return True
         
         return False
@@ -75,23 +75,33 @@ class PlexHelper:
         result = set()
         
         def __populate_watching(item):
+            total = 0
             for media in item.media:
                 for part in media.parts:
                     path = self.rewriter(part.file)
-                    if os.path.exists(path):
+                    if not os.path.exists(path):
                         logging.debug("Watching not on cache %s: %s (%s)", item.type, item.title, path)
                         result.add(path)
+                        total += 1
+            return total
         
         for item in sorted(self.__plex.continueWatching(), key=lambda i: i.lastViewedAt or 0, reverse=True):
             if item.type == 'movie':
                 __populate_watching(item)
             elif item.type == 'episode':
                 show = item.show()
+                remaining = 5
                 key = (item.seasonNumber, item.index) if item.isWatched else (item.seasonNumber, item.index -1)
                 for episode in sorted([e for e in show.episodes() if (e.seasonNumber, e.index) > key], key=lambda e: (e.seasonNumber, e.index)):                    
+                    if not remaining:
+                        break
+                    
                     if episode.seasonNumber < item.seasonNumber and episode.index < item.index:
                         continue
-                    __populate_watching(episode)
+                    if __populate_watching(episode):
+                        remaining -= 1
+                        
+        logging.info("Found %d watching files in the plex library", len(result))
                     
         return result
     
