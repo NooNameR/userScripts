@@ -124,5 +124,5 @@ class MovingMapping:
             f"       Age range: {timedelta(seconds=self.min_age)} – {"..." if self.max_age == float('inf') else timedelta(seconds=self.max_age)}\n"
             f"       Clients: [{', '.join(map(str, self.clients))}]\n"
             f"       Plex: [{', '.join(map(str, self.plex))}]\n"
-            f"       Ignore patterns: {self.ignores}"
+            f"       Ignore patterns: [{', '.join(map(str, self.ignores))}]"
         )

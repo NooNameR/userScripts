@@ -42,7 +42,7 @@ def move_to_destination(mapping: MovingMapping) -> int:
             
     processed = set()
     
-    for src_file in sorted(files, key = lambda item: sort_func(mapping, item, inodes_map)):
+    for src_file in sorted(files_to_move, key = lambda item: sort_func(mapping, item, inodes_map)):
         if src_file in processed:
             logging.debug("File was already processed: %s", src_file)
             continue
@@ -201,7 +201,7 @@ if __name__ == "__main__":
     try:
         for mapping in config.mappings:
             try:            
-                startingtotal, startingused, startingfree = shutil.disk_usage(mapping.source)
+                _, _, startingfree = shutil.disk_usage(mapping.source)
                 emptiedspace = move_to_destination(mapping)
                 moved_to_source = move_to_source(mapping)
                 _, _, ending_free = shutil.disk_usage(mapping.source)
