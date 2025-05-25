@@ -24,6 +24,7 @@ class Config:
             source = m["source"],
             destination = m["destination"],
             threshold = m.get("threshold", 0.0),
+            cache_threshold = m.get("cache_threshold", 0.0),
             min_age = parse(m.get("min_age", "2h")),
             max_age = parse(m.get("max_age")) if m.get("max_age") else float('inf'),
             clients = [QbitHelper(**client) for client in m.get("clients", [])],
@@ -42,10 +43,11 @@ class Config:
         return "\n".join(out)
 
 class MovingMapping:   
-    def __init__(self, now, source: str, destination: str, threshold: float, min_age: int, max_age: int, clients: list[QbitHelper], plex: list[PlexHelper], ignores: set[str]):
+    def __init__(self, now, source: str, destination: str, threshold: float, cache_threshold: float, min_age: int, max_age: int, clients: list[QbitHelper], plex: list[PlexHelper], ignores: set[str]):
         self.source = source
         self.destination = destination
         self.threshold = threshold
+        self.cache_threshold = cache_threshold
         self.clients = clients
         self.plex = plex
         self.min_age = min_age
@@ -64,6 +66,30 @@ class MovingMapping:
         logging.info("Space usage: %.4g%% is below moving threshold: %.4g%%. Skipping %s...", percent_used, self.threshold, self.source)
         return False
     
+    def can_move_to_cache(self) -> bool:
+        total, used, _ = shutil.disk_usage(self.source)
+        percent_used = round((used / total) * 100, 4)
+        
+        if self.threshold > percent_used and percent_used <= self.cache_threshold:
+            logging.debug("Space usage: %.4g%% is belowe cache threshold: %.4g%%. Starting %s...", percent_used, self.cache_threshold, self.source)
+            return True
+        
+        logging.info("Space usage: %.4g%% is above cache threshold: %.4g%%. Skipping %s...", percent_used, self.cache_threshold, self.source)
+        return False
+    
+    def eligible_for_cache(self) -> set[str]:
+        result = []
+        
+        for file in [i for plex in self.plex for i in plex.continue_watching]:
+            rel_path = os.path.relpath(file, self.source)
+            result.append(os.path.join(self.destination, rel_path))
+        
+        return result
+    
+    def get_cache_file(self, path: str) -> str:
+        rel_path = os.path.relpath(path, self.destination)
+        return os.path.join(self.source, rel_path)
+        
     def get_dest_file(self, src_path: str) -> str:
         rel_path = os.path.relpath(src_path, self.source)
         return os.path.join(self.destination, rel_path)
@@ -101,6 +127,7 @@ class MovingMapping:
             f"       Source: {self.source}\n"
             f"       Destination: {self.destination}\n"
             f"       Threshold: {self.threshold:.4g}%\n"
+            f"       Cache Threshold: {self.cache_threshold:.4g}%\n"
             f"       Age range: {timedelta(seconds=self.min_age)} – {"..." if self.max_age == float('inf') else timedelta(seconds=self.max_age)}\n"
             f"       Clients: [{", ".join([str(helper) for helper in self.clients])}]\n"
             f"       Plex: [{", ".join([str(helper) for helper in self.plex])}]"
