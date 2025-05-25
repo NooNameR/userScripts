@@ -13,9 +13,9 @@ mappings:
     # Careful with min_age usage as it will prevent files from being moved if file is younger than that, but disk usage is higher
     # Ideally min_age can be set to 1d, but files are gonna be sorted as explained above
     threshold: 70
-    # move files back to cache if bellow this threshold
+    # move files back to cache if bellow this threshold, setting higher than threshold will help to rebalance based on plex state
     # Currently watching will be used as a source
-    cache_threshold: 50
+    cache_threshold: 75
     # qbit clients
     clients:
       - host: localhost:8080
