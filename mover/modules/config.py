@@ -69,7 +69,10 @@ class MovingMapping:
         
         for file in [i for plex in self.plex for i in plex.continue_watching]:
             rel_path = os.path.relpath(file, self.source)
-            result.append(os.path.join(self.destination, rel_path))
+            path = os.path.join(self.destination, rel_path)
+            
+            if os.path.exists(path):
+                result.append(path)
         
         return result
     

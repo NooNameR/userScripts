@@ -26,10 +26,7 @@ def migrate_files(mapping: MovingMapping) -> int:
 
         for file in files:
             src_file = os.path.join(root, file)
-            
-            if mapping.is_ignored(src_file):
-                continue
-            
+        
             # Get the inode of the source file
             inode = helpers.get_stat(src_file).st_ino
 
@@ -56,6 +53,10 @@ def move_files(mapping: MovingMapping, files: set[str], inode_map: Dict[int, set
     for src_file in sorted(files, key = lambda item: sort_func(mapping, item, inode_map)):
         if src_file in processed:
             logging.debug("File was already processed: %s", src_file)
+            continue
+        
+        if mapping.is_ignored(src_file):
+            logging.debug("File is ignored: %s", src_file)
             continue
         
         # Check if the file is within the age range
@@ -125,10 +126,7 @@ def move_to_source(mapping: MovingMapping) -> int:
                 
         for file in files:
             src_file = os.path.join(root, file)
-            
-            if mapping.is_ignored(src_file):
-                continue
-            
+
             # Get the inode of the source file
             inode = helpers.get_stat(src_file).st_ino
             if inode in inode_map:
@@ -137,6 +135,11 @@ def move_to_source(mapping: MovingMapping) -> int:
     processed = set()
     for src_file in files_to_move:
         if src_file in processed:
+            logging.debug("File was already processed: %s", src_file)
+            continue
+        
+        if mapping.is_ignored(src_file):
+            logging.debug("File is ignored: %s", src_file)
             continue
         
         if not mapping.can_move_to_source():
