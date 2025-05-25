@@ -89,7 +89,7 @@ class PlexHelper:
                 for part in media.parts:
                     path = self.rewriter(part.file)
                     if not os.path.exists(path):
-                        logging.debug("Watching not on cache %s: %s (%s)", item.type, item.title, path)
+                        logging.debug("Watching not on source %s: %s (%s)", item.type, item.title, path)
                         result[path] = None
         
         active_items = self.__active_items()
@@ -109,7 +109,7 @@ class PlexHelper:
                     
                     __populate_watching(episode)
         
-        logging.info("Detected %d watching files not currently available on cache drives in Plex library", len(result))
+        logging.info("Detected %d watching files not currently available on source drives in Plex library", len(result))
                     
         return list(result.keys())
     

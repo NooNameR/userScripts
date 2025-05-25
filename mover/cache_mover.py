@@ -9,8 +9,15 @@ from collections import defaultdict
 from modules.config import Config, MovingMapping
 
 lock_file_path = '/tmp/cache_mover.lock'
-        
-def migrate_files(mapping: MovingMapping) -> int:
+
+def sort_func(mapping: MovingMapping, key: str, inode_map: Dict[int, set[str]]) -> Tuple[int, int, int, float]:
+    stat = helpers.get_stat(key)
+    age_priority = 0 if mapping.is_file_within_age_range(key) else 1
+    hardlinks = len(inode_map.get(stat.st_ino, []))
+    is_watched = 0 if mapping.is_watched(key) else 1
+    return (age_priority, hardlinks, is_watched, helpers.get_ctime(key))
+
+def move_to_destination(mapping: MovingMapping) -> int:
     total = 0
     
     if not mapping.needs_moving():
@@ -32,25 +39,10 @@ def migrate_files(mapping: MovingMapping) -> int:
 
             files_to_move.add(src_file)
             inodes_map[inode].add(src_file)
-    
-    total += move_files(mapping, files_to_move, inodes_map)
-    helpers.delete_empty_dirs(mapping.source, mapping.is_ignored)
-    
-    return total
-
-def sort_func(mapping: MovingMapping, key: str, inode_map: Dict[int, set[str]]) -> Tuple[int, int, int, float]:
-    stat = helpers.get_stat(key)
-    age_priority = 0 if mapping.is_file_within_age_range(key) else 1
-    hardlinks = len(inode_map.get(stat.st_ino, []))
-    is_watched = 0 if mapping.is_watched(key) else 1
-    return (age_priority, hardlinks, is_watched, helpers.get_ctime(key))
-    
-
-def move_files(mapping: MovingMapping, files: set[str], inode_map: Dict[int, set[str]]) -> int:
-    total = 0
+            
     processed = set()
-
-    for src_file in sorted(files, key = lambda item: sort_func(mapping, item, inode_map)):
+    
+    for src_file in sorted(files, key = lambda item: sort_func(mapping, item, inodes_map)):
         if src_file in processed:
             logging.debug("File was already processed: %s", src_file)
             continue
@@ -86,7 +78,7 @@ def move_files(mapping: MovingMapping, files: set[str], inode_map: Dict[int, set
         
         processed.add(src_file)
         
-        for link_src_file in inode_map.get(stat.st_ino, set()):
+        for link_src_file in inodes_map.get(stat.st_ino, set()):
             if link_src_file in processed:
                 continue
             
@@ -108,7 +100,9 @@ def move_files(mapping: MovingMapping, files: set[str], inode_map: Dict[int, set
                 
         helpers.delete_file(src_file)
         total += stat.st_size
-        
+    
+    helpers.delete_empty_dirs(mapping.source, mapping.is_ignored)
+    
     return total
 
 def move_to_source(mapping: MovingMapping) -> int:
@@ -119,6 +113,8 @@ def move_to_source(mapping: MovingMapping) -> int:
     files_to_move = mapping.eligible_for_source()
     if not files_to_move:
         return total
+    
+    logging.info("Scanning %s...", mapping.destination)
     
     inode_map = {helpers.get_stat(f).st_ino: set() for f in files_to_move}
     for root, dirs, files in os.walk(mapping.destination):
@@ -143,6 +139,7 @@ def move_to_source(mapping: MovingMapping) -> int:
             continue
         
         if not mapping.can_move_to_source():
+            logging.debug("Stopping mover, source: %s is above the threshold", mapping.source)
             break
         
         stat = helpers.get_stat(src_file)
@@ -205,7 +202,7 @@ if __name__ == "__main__":
         for mapping in config.mappings:
             try:            
                 startingtotal, startingused, startingfree = shutil.disk_usage(mapping.source)
-                emptiedspace = migrate_files(mapping)
+                emptiedspace = move_to_destination(mapping)
                 moved_to_source = move_to_source(mapping)
                 _, _, ending_free = shutil.disk_usage(mapping.source)
                 logging.info("Migration and hardlink recreation completed successfully from '%s' to '%s'", mapping.source, mapping.destination)
