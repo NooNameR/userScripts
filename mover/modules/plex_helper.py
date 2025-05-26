@@ -1,20 +1,21 @@
 import sys
 import os
 import logging
+from .rewriter import Rewriter, RealRewriter, NoopRewriter
 from typing import Dict
 from collections import OrderedDict
 from datetime import datetime, timedelta
 from functools import cached_property
 
 class PlexHelper:
-    def __init__(self, url: str, token: str, rewrite: Dict[str, str] = {}):
+    def __init__(self, source: str, url: str, token: str, rewrite: Dict[str, str] = {}):
         self.url = url
         self.token = token
         if rewrite and "from" in rewrite and "to" in rewrite:
             src, dst = rewrite["from"], rewrite["to"]
-            self.rewriter = lambda path: path.replace(src, dst, 1)
+            self.rewriter: Rewriter = RealRewriter(source, src, dst)
         else:
-            self.rewriter = lambda path: path  # no-op
+            self.rewriter: Rewriter = NoopRewriter()
         
     @cached_property
     def __plex(self):
@@ -37,7 +38,7 @@ class PlexHelper:
         def __populate_watched(item):
             for media in item.media:
                 for part in media.parts:
-                    path = self.rewriter(part.file)
+                    path = self.rewriter.rewrite(part.file)
                     if os.path.exists(path):
                         logging.debug("Watched %s: %s (%s)", item.type, item.title, path)
                         watched.add(path)
@@ -65,7 +66,7 @@ class PlexHelper:
                     if not part.file:
                         continue
 
-                    path = self.rewriter(part.file)
+                    path = self.rewriter.rewrite(part.file)
                     if os.path.exists(path) and os.path.samefile(path, file):
                         return True
         
@@ -86,7 +87,7 @@ class PlexHelper:
         def __populate_watching(item):
             for media in item.media:
                 for part in media.parts:
-                    path = self.rewriter(part.file)
+                    path = self.rewriter.rewrite(part.file)
                     if not os.path.exists(path):
                         logging.debug("Watching not on source %s: %s (%s)", item.type, item.title, path)
                         result[path] = None

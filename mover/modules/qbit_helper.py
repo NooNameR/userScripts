@@ -2,19 +2,20 @@ import os
 import sys
 import logging
 from functools import cached_property
+from .rewriter import Rewriter, RealRewriter, NoopRewriter
 from typing import Dict
 from .helpers import execute
 
 class QbitHelper:
-    def __init__(self, host: str, user: str, password: str, rewrite: Dict[str, str] = {}):
+    def __init__(self, source: str, host: str, user: str, password: str, rewrite: Dict[str, str] = {}):
         self.rewrite = rewrite
         self.host = host
         self.user = user
         if rewrite and "from" in rewrite and "to" in rewrite:
             src, dst = rewrite["from"], rewrite["to"]
-            self.rewriter = lambda path: path.replace(src, dst, 1)
+            self.rewriter: Rewriter = RealRewriter(source, src, dst)
         else:
-            self.rewriter = lambda path: path  # no-op
+            self.rewriter: Rewriter = NoopRewriter()
         self.password = password
         self.torrents = []
         self.paused_torrents = []
@@ -47,7 +48,7 @@ class QbitHelper:
         return self.torrents
     
     def __cache_path(self, torrent) -> str:
-        return self.rewriter(torrent.content_path)
+        return self.rewriter.rewrite(torrent.content_path)
             
     def __filter(self, torrents):
         result = []

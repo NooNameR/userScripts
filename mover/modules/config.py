@@ -38,8 +38,8 @@ class MovingMapping:
         self.cache_threshold = raw.get("cache_threshold", 0.0)
         self.min_age = parse(raw.get("min_age", "2h"))
         self.max_age = parse(raw.get("max_age")) if raw.get("max_age") else float('inf')
-        self.clients = [QbitHelper(**client) for client in raw.get("clients", [])]
-        self.plex = [PlexHelper(**client) for client in raw.get("plex", [])]
+        self.clients = [QbitHelper(self.source, **client) for client in raw.get("clients", [])]
+        self.plex = [PlexHelper(self.source, **client) for client in raw.get("plex", [])]
         self.ignores = set(raw.get("ignore", []))
         
     def needs_moving(self) -> bool:
