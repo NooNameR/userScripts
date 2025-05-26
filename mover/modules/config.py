@@ -95,9 +95,9 @@ class MovingMapping:
         for qbit in self.clients:
             qbit.resume()
             
-    def is_watched(self, file: str) -> bool:
+    def is_not_watched(self, file: str) -> bool:
         for plex in self.plex:
-            if plex.is_watched(file):
+            if plex.is_not_watched(file):
                 return True
         return False
     

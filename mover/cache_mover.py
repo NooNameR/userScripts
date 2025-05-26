@@ -14,8 +14,8 @@ def sort_func(mapping: MovingMapping, key: str, inode_map: Dict[int, set[str]]) 
     stat = helpers.get_stat(key)
     age_priority = 0 if mapping.is_file_within_age_range(key) else 1
     hardlinks = len(inode_map.get(stat.st_ino, []))
-    is_watched = 0 if mapping.is_watched(key) else 1
-    return (age_priority, hardlinks, is_watched, helpers.get_ctime(key))
+    is_not_watched = 1 if mapping.is_not_watched(key) else 0
+    return (age_priority, hardlinks, is_not_watched, helpers.get_ctime(key))
 
 def move_to_destination(mapping: MovingMapping) -> int:
     total = 0

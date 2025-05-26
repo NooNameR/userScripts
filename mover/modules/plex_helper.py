@@ -27,7 +27,7 @@ class PlexHelper:
     def __plex_servers(self):
         plex = self.__plex
         
-        return [plex] + [plex.switchUser(u) for u in plex.myPlexAccount().users() if not self.users or u.user.username in self.users]
+        return [plex] + [plex.switchUser(u) for u in plex.myPlexAccount().users() if not self.users or u.username in self.users]
     
     def get_plex_server(self, token):
         try:
@@ -39,8 +39,8 @@ class PlexHelper:
         return PlexServer(self.url, token)
     
     @cached_property
-    def watched_media(self) -> set[str]:
-        watched = set()
+    def not_watched_media(self) -> set[str]:
+        not_watched = set()
         
         def __populate_watched(item):
             for media in item.media:
@@ -48,24 +48,26 @@ class PlexHelper:
                     path = self.rewriter.rewrite(part.file)
                     if os.path.exists(path):
                         logging.debug("Watched %s: %s (%s)", item.type, item.title, path)
-                        watched.add(path)
+                        not_watched.add(path)
         
         for plex in self.__plex_servers:
-            sections = [plex.library.section(s) for s in self.libraries] if self.libraries else plex.library.sections()
-            for section in sections:
+            for section in plex.library.sections():
                 if section.type not in {'movie', 'show'}:
                     continue
                 
-                for item in section.search(unwatched=False):            
+                if self.libraries and section.title not in self.libraries:
+                    continue
+                
+                for item in section.search(unwatched=True):            
                     if item.type == 'movie':
                         __populate_watched(item)
                     elif item.type == 'show':
                         for episode in item.episodes():
                             __populate_watched(episode)
                        
-        logging.info("Found %d watched files in the plex library", len(watched))
+        logging.info("Found %d not-watched files in the plex library", len(not_watched))
                                     
-        return watched
+        return not_watched
     
     def is_active(self, file: str) -> bool:
         for ratingKey in self.__active_items():
@@ -84,8 +86,8 @@ class PlexHelper:
     def __active_items(self) -> set[str]:
         return set([session.ratingKey for session in self.__plex.sessions()])
 
-    def is_watched(self, file: str) -> bool:
-        return file in self.watched_media
+    def is_not_watched(self, file: str) -> bool:
+        return file in self.not_watched_media
     
     @cached_property
     def continue_watching(self) -> list[str]:
