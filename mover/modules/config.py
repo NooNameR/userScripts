@@ -54,6 +54,9 @@ class MovingMapping:
         return False
     
     def can_move_to_source(self) -> bool:
+        if not self.cache_threshold:
+            return False
+        
         total, used, _ = shutil.disk_usage(self.source)
         percent_used = round((used / total) * 100, 4)
         

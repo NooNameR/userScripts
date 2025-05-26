@@ -8,9 +8,11 @@ from datetime import datetime, timedelta
 from functools import cached_property
 
 class PlexHelper:
-    def __init__(self, source: str, url: str, token: str, rewrite: Dict[str, str] = {}):
+    def __init__(self, source: str, url: str, token: str, libraries: list[str] = [], users: list[str] = [], rewrite: Dict[str, str] = {}):
         self.url = url
         self.token = token
+        self.libraries = set(libraries)
+        self.users = set(users)
         if rewrite and "from" in rewrite and "to" in rewrite:
             src, dst = rewrite["from"], rewrite["to"]
             self.rewriter: Rewriter = RealRewriter(source, src, dst)
@@ -20,6 +22,12 @@ class PlexHelper:
     @cached_property
     def __plex(self):
         return self.get_plex_server(self.token)
+    
+    @cached_property
+    def __plex_servers(self):
+        plex = self.__plex
+        
+        return [plex] + [plex.switchUser(u) for u in plex.myPlexAccount().users() if not self.users or u.user.username in self.users]
     
     def get_plex_server(self, token):
         try:
@@ -31,9 +39,8 @@ class PlexHelper:
         return PlexServer(self.url, token)
     
     @cached_property
-    def watched_media(self):
+    def watched_media(self) -> set[str]:
         watched = set()
-        plex = self.__plex
         
         def __populate_watched(item):
             for media in item.media:
@@ -42,17 +49,19 @@ class PlexHelper:
                     if os.path.exists(path):
                         logging.debug("Watched %s: %s (%s)", item.type, item.title, path)
                         watched.add(path)
-            
-        for section in plex.library.sections():
-            if section.type not in {'movie', 'show'}:
-                continue
-            
-            for item in section.search(unwatched=False):            
-                if item.type == 'movie':
-                    __populate_watched(item)
-                elif item.type == 'show':
-                    for episode in item.episodes():
-                       __populate_watched(episode)
+        
+        for plex in self.__plex_servers:
+            sections = [plex.library.section(s) for s in self.libraries] if self.libraries else plex.library.sections()
+            for section in sections:
+                if section.type not in {'movie', 'show'}:
+                    continue
+                
+                for item in section.search(unwatched=False):            
+                    if item.type == 'movie':
+                        __populate_watched(item)
+                    elif item.type == 'show':
+                        for episode in item.episodes():
+                            __populate_watched(episode)
                        
         logging.info("Found %d watched files in the plex library", len(watched))
                                     
@@ -79,7 +88,7 @@ class PlexHelper:
         return file in self.watched_media
     
     @cached_property
-    def continue_watching(self) -> set[str]:
+    def continue_watching(self) -> list[str]:
         result = OrderedDict()
         cutoff = datetime.now() - timedelta(weeks=1)
         active_items = self.__active_items()
@@ -97,6 +106,10 @@ class PlexHelper:
                 return item.isWatched or item.ratingKey in active_items
                 
             for item in sorted(items, key=lambda i: i.lastViewedAt or 0, reverse=True):
+                if self.libraries and item.librarySectionTitle not in self.libraries:
+                    logging.debug("Item: %s is in %s library skipping...", item.title, item.librarySectionTitle)
+                    continue
+                
                 if not item.lastViewedAt or item.lastViewedAt < cutoff:
                     logging.debug("Item: %s last watched at %s (cutoff: %s) — skipping...", item.title, item.lastViewedAt or "?", cutoff)
                     continue
@@ -115,7 +128,7 @@ class PlexHelper:
                         __populate_watching(episode)
                         remaining -= 1
 
-        for server in [self.__plex] + [self.__plex.switchUser(u) for u in self.__plex.myPlexAccount().users()]:
+        for server in self.__plex_servers:
             get_continue_watching(server.continueWatching())
     
         logging.info("Detected %d watching files not currently available on source drives in Plex library", len(result))
