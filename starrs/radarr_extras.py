@@ -12,8 +12,8 @@ from logging.handlers import RotatingFileHandler
 script_name = "Radarr-Trailer"
 log_file = "/config/logs/trailer_downloader.log"
 id_file = "/config/logs/trailer_id.log"
-media_location = "/data/media"
 encoding = "utf-8"
+youtube_api = "http://ytptube:8081/api"
 
 open(log_file, 'a').close()
 
@@ -39,21 +39,8 @@ movie_id = os.getenv("radarr_movie_id")
 tmdb_id = os.getenv("radarr_movie_tmdbid")
 movie_path = os.getenv("radarr_movie_path")
 tmdb_api_key = os.getenv("TMDB_API_KEY")
-language = os.getenv("LANGUAGE") or "en-US"
+language = os.getenv("EXTRA_LANGUAGE") or "en-US"
 proxy = os.getenv("PROXY")
-
-def has_processed(trailer_key: str) -> bool:
-    if not os.path.exists(id_file):
-        return False
-    
-    with open(id_file, "r", encoding=encoding) as f:
-        processed = set(line.strip() for line in f if line.strip())
-        return trailer_key in processed
-
-def mark_processed(trailer_key: str):
-    with open(id_file, "a", encoding=encoding) as f:
-        f.write(trailer_key)
-        f.write(os.linesep)
 
 def http_get(url):
     try:
@@ -67,17 +54,13 @@ def http_get(url):
         logger.error("Unexpected error fetching %s - %s", url, e)
     return None, None
 
-def check_download_status(youtube_id, retries=5, delay=15):
-    """
-    Poll ytptube /api/history endpoint to check if the download succeeded or failed.
-    retries: number of polling attempts
-    delay: seconds between attempts
-    """
+def check_download_status(youtube_id, retries, delay) -> str | None:
     for attempt in range(1, retries + 1):
-        time.sleep(delay)
+        time.sleep(delay * attempt)
         
         logger.info("Checking download status for %s (Attempt %d/%d)...", youtube_id, attempt, retries)
-        status_code, history_body = http_get("http://ytptube:8081/api/history")
+        status_code, history_body = http_get(f"{youtube_api}/history")
+        
         if status_code != 200 or history_body is None:
             logger.warning("Failed to fetch download history on attempt %d", attempt)
         else:
@@ -85,7 +68,7 @@ def check_download_status(youtube_id, retries=5, delay=15):
                 result = json.loads(history_body)
             except Exception as e:
                 logger.error("Failed to parse download history JSON: %s", e)
-                return False
+                return None
             
             for item in result.get('history', []):
                 if item.get("id") == youtube_id:
@@ -93,18 +76,19 @@ def check_download_status(youtube_id, retries=5, delay=15):
                     if status == "error":
                         error_msg = item.get("error") or item.get("msg") or "Unknown error"
                         logger.error("Download failed for %s: %s", youtube_id, error_msg)
-                        return False
+                        return None
                     elif status == "finished":
                         logger.info("Download succeeded for %s", youtube_id)
-                        return True
+                        return os.path.join(item["download_dir"], item["filename"])
+                    elif status == "downloading":
+                        logger.info("Download is in progress for %s, waiting...", youtube_id)
+                        break  # exit for-loop but stay in retry loop
                     else:
                         logger.info("Download status for %s is '%s', waiting...", youtube_id, status)
-                    break
-            else:
-                logger.warning("No download entry found for %s", youtube_id)
+                        break
 
     logger.error("Download status check timed out for %s", youtube_id)
-    return False
+    return None
 
 def http_post(url, data, headers=None):
     headers = headers or {}
@@ -125,6 +109,20 @@ def http_post(url, data, headers=None):
     except Exception as e:
         logger.error("Request failed for %s - %s", url, e)
         return None, None
+    
+def try_link(dir: str, youtube_id: str, retries=1, delay=0):
+    file = check_download_status(youtube_id, retries, delay)
+    if not file:
+        return False
+    
+    dst = os.path.join(dir, os.path.basename(file))
+    if os.path.exists(dst):
+        logger.info("Skipping file: %s, already exists", dst)
+        return True
+    
+    logger.info("Linking: %s to %s", file, dst)
+    os.link(file, dst)
+    return True
 
 def main():
     if event_type == "Test":
@@ -157,43 +155,44 @@ def main():
     if not trailers:
         logger.info("%s - No trailers found on TMDb", movie_title)
         sys.exit(0)
+        
+    trailer_dir = os.path.join(movie_path, "Trailers")
     
     for trailer in trailers:
         trailer_key = trailer.get("key")
         trailer_title = trailer.get("name")
-
-        if has_processed(trailer_key):
-            logger.info("Movie already processed - '%s' (TrailerKey: %s)", movie_title, trailer_key)
-            sys.exit(0)
+            
+        os.makedirs(trailer_dir, exist_ok=True)
+            
+        if try_link(trailer_dir, trailer_key):
+            return
 
         logger.info("%s - Found trailer '%s' (Key: %s)", movie_title, trailer_title, trailer_key)
         
         youtube_url = "https://www.youtube.com/watch?v=%s" % trailer_key
-        relative_path = os.path.relpath(movie_path, media_location)
-        trailer_dir = os.path.join(relative_path, "Trailers")
-
+        lang, country = language.split("-")
+        
         payload = {
             "url": youtube_url,
             "preset": "default",
-            "folder": trailer_dir,
-            "cli": f"--geo-bypass --geo-bypass-country {language.split("-")[1]} --proxy {proxy}"
+            "folder": f"/trailers/{language}",
+            "cli": f"--geo-bypass --geo-bypass-country {country} --proxy {proxy} --write-subs --sub-lang {lang} --embed-subs"
         }
 
         logger.info("%s - Sending download request to ytptube /history", movie_title)
         status_code, body = http_post(
-            "http://ytptube:8081/api/history",
+            f"{youtube_api}/history",
             data=payload,
             headers={"Content-Type": "application/json"}
         )
 
         if status_code == 200:
-            logger.info("%s - Download request accepted by MeTube - response: %s", movie_title, body)
+            logger.info("%s - Download request accepted by ytptube - response: %s", movie_title, body)
             
-            if check_download_status(trailer_key):
-                mark_processed(trailer_key)
+            if try_link(trailer_dir, trailer_key, retries=5, delay=30):
                 return
         else:
-            logger.error("%s - MeTube error response - %s (HTTP %d)", movie_title, body, status_code)
+            logger.error("%s - ytptube error response - %s (HTTP %d)", movie_title, body, status_code)
 
 if __name__ == "__main__":
     main()
