@@ -4,11 +4,12 @@ import logging
 from .rewriter import Rewriter, RealRewriter, NoopRewriter
 from typing import Dict
 from collections import OrderedDict
-from datetime import datetime, timedelta
+from datetime import timedelta
 from functools import cached_property
 
 class PlexHelper:
-    def __init__(self, source: str, url: str, token: str, libraries: list[str] = [], users: list[str] = [], rewrite: Dict[str, str] = {}):
+    def __init__(self, now, source: str, url: str, token: str, libraries: list[str] = [], users: list[str] = [], rewrite: Dict[str, str] = {}):
+        self.now = now
         self.url = url
         self.token = token
         self.libraries = set(libraries)
@@ -92,7 +93,7 @@ class PlexHelper:
     @cached_property
     def continue_watching(self) -> list[str]:
         result = OrderedDict()
-        cutoff = datetime.now() - timedelta(weeks=1)
+        cutoff = self.now - timedelta(weeks=1)
         active_items = self.__active_items()
         
         def __populate_watching(item):

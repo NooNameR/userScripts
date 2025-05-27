@@ -5,6 +5,7 @@ import sys
 import logging
 import modules.helpers as helpers
 from typing import Dict, Tuple
+from datetime import datetime
 from collections import defaultdict
 from modules.config import Config, MovingMapping
 
@@ -186,9 +187,11 @@ if __name__ == "__main__":
         datefmt="%Y-%m-%d %H:%M:%S",
         handlers=[logging.StreamHandler(sys.stdout)],
     )
-    helpers.set_dry_run(args.dry_run)
     
-    config = Config(args.config)
+    now = datetime.now()
+    helpers.init(now, args.dry_run)
+    
+    config = Config(now, args.config)
     logging.info(config)
 
     lock_file = open(lock_file_path, 'w')

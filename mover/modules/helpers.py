@@ -8,11 +8,13 @@ from datetime import datetime
 
 _stat_cache: Dict[str, os.stat_result] = {}
 _age_cache: Dict[str, float] = {}
-_dry_run = False
+_dry_run: bool = False
+_now: datetime = datetime.now()
 
-def set_dry_run(value: bool):
-    global _dry_run
-    _dry_run = value
+def init(now: datetime, dry_run: bool):
+    global _dry_run, _now
+    _dry_run = dry_run
+    _now = now
 
 def maybe_create_dir(src_file: str, dest_file: str) -> None:
     dest_dir = Path(dest_file).parent
@@ -118,8 +120,7 @@ def get_ctime(file: str) -> float:
 
 def get_age_str(file: str) -> str:
     created_dt = datetime.fromtimestamp(get_ctime(file))
-    now = datetime.now()
-    return f"{(now - created_dt).days}d"
+    return f"{(_now - created_dt).days}d"
     
 def __get_birthtime(filepath) -> float:
     """

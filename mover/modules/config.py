@@ -7,15 +7,15 @@ import logging
 from .plex_helper import PlexHelper
 from .qbit_helper import QbitHelper
 from .helpers import get_ctime
-from datetime import timedelta
+from datetime import datetime, timedelta
 from pytimeparse2 import parse
 
 class Config:
-    def __init__(self, path='config.yaml'):
-        self.now = time.time()
+    def __init__(self, now: datetime, path='config.yaml'):
+        self.now: datetime = now
         self.raw = pyaml_env.parse_config(path)
     
-        self.mappings = [self.__parse_mapping(m) for m in self.raw.get("mappings", [])]
+        self.mappings: list["MovingMapping"] = [self.__parse_mapping(m) for m in self.raw.get("mappings", [])]
         
     def __parse_mapping(self, m) -> "MovingMapping":
         return MovingMapping(self.now, m)
@@ -30,17 +30,17 @@ class Config:
         return "\n".join(out)
 
 class MovingMapping:   
-    def __init__(self, now, raw):
-        self.now = now
-        self.source = raw["source"]
-        self.destination = raw["destination"]
-        self.threshold = raw.get("threshold", 0.0)
-        self.cache_threshold = raw.get("cache_threshold", 0.0)
-        self.min_age = parse(raw.get("min_age", "2h"))
-        self.max_age = parse(raw.get("max_age")) if raw.get("max_age") else float('inf')
-        self.clients = [QbitHelper(self.source, **client) for client in raw.get("clients", [])]
-        self.plex = [PlexHelper(self.source, **client) for client in raw.get("plex", [])]
-        self.ignores = set(raw.get("ignore", []))
+    def __init__(self, now: datetime, raw):
+        self.now: datetime = now
+        self.source: str = raw["source"]
+        self.destination: str = raw["destination"]
+        self.threshold: float = raw.get("threshold", 0.0)
+        self.cache_threshold: float = raw.get("cache_threshold", 0.0)
+        self.min_age: int = parse(raw.get("min_age", "2h"))
+        self.max_age: int = parse(raw.get("max_age")) if raw.get("max_age") else float('inf')
+        self.clients: list[QbitHelper] = [QbitHelper(self.source, **client) for client in raw.get("clients", [])]
+        self.plex: list[PlexHelper] = [PlexHelper(self.now, self.source, **client) for client in raw.get("plex", [])]
+        self.ignores: set[str] = set(raw.get("ignore", []))
         
     def needs_moving(self) -> bool:
         total, used, _ = shutil.disk_usage(self.source)
@@ -67,7 +67,7 @@ class MovingMapping:
         logging.info("Space usage: %.4g%% is above cache threshold: %.4g%%. Skipping %s...", percent_used, self.cache_threshold, self.source)
         return False
     
-    def eligible_for_source(self) -> set[str]:
+    def eligible_for_source(self) -> list[str]:
         result = []
         
         for file in [i for plex in self.plex for i in plex.continue_watching]:
@@ -114,7 +114,7 @@ class MovingMapping:
         return any(fnmatch.fnmatch(path, pattern) for pattern in self.ignores)
     
     def is_file_within_age_range(self, filepath: str) -> bool:
-        file_age = self.now - get_ctime(filepath)
+        file_age = self.now.timestamp() - get_ctime(filepath)
         return self.min_age <= file_age <= self.max_age
     
     def __str__(self) -> str:
