@@ -3,6 +3,7 @@ import fcntl
 import shutil
 import sys
 import logging
+from logging.handlers import RotatingFileHandler
 import modules.helpers as helpers
 from typing import Dict, Tuple
 from datetime import datetime
@@ -179,13 +180,24 @@ if __name__ == "__main__":
     parser.add_argument("--config", type=str, help="Path to config yaml", required=True)
     parser.add_argument("--dry-run", help="Dry-run mode", action="store_true", default=False)
     parser.add_argument("--log-level", type=str, help="Default logger level", choices=list(logging._nameToLevel.keys()), default="INFO")
+    parser.add_argument("--log-file", type=str, help="Log filepath", required=False)
     args = parser.parse_args()
+    
+    handlers = [logging.StreamHandler(sys.stdout)]
+    
+    if args.log_file:
+        open(args.log_file, 'a').close()
+        handlers.append(RotatingFileHandler(
+            args.log_file,
+            maxBytes=5 * 1024 * 1024,  # 5 MB
+            backupCount=3              # keep 3 old log files
+        ))
     
     logging.basicConfig(
         level=args.log_level,
         format=f"{("[DRY-RUN]: " if args.dry_run else "")}%(asctime)s - %(levelname)s - %(message)s",
         datefmt="%Y-%m-%d %H:%M:%S",
-        handlers=[logging.StreamHandler(sys.stdout)],
+        handlers=handlers,
     )
     
     now = datetime.now()
