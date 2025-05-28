@@ -1,7 +1,7 @@
 import sys
 import os
 import logging
-from .media_player import MediaPlayer
+from .media_player import MediaPlayer, MediaPlayerType
 from ..rewriter import Rewriter, RealRewriter, NoopRewriter
 from typing import Dict
 from collections import OrderedDict
@@ -144,3 +144,6 @@ class Plex(MediaPlayer):
     
     def __repr__(self):
         return self.__str__()
+    
+    def type(self):
+        return MediaPlayerType.PLEX

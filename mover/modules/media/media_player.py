@@ -1,4 +1,9 @@
 from abc import ABC, abstractmethod
+from enum import Enum
+
+class MediaPlayerType(Enum):
+    PLEX = 1
+    JELLYFIN = 2
 
 class MediaPlayer(ABC):
     @abstractmethod
@@ -7,4 +12,8 @@ class MediaPlayer(ABC):
     
     @abstractmethod
     def is_not_watched(self, file: str) -> bool:
+        pass
+    
+    @abstractmethod
+    def type(self) -> MediaPlayerType:
         pass
