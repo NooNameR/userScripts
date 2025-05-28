@@ -23,12 +23,12 @@ class Jellyfin(MediaPlayer):
 
     def _headers(self):
         return {
-            "X-Emby-Token": self.token,
+            "Authorization": f'MediaBrowser Token="{self.token}"',
             "Accept": "application/json"
         }
 
     def _get(self, endpoint, params=None):
-        response = requests.get(f"{self.url}/emby{endpoint}", headers=self._headers(), params=params)
+        response = requests.get(f"{self.url}{endpoint}", headers=self._headers(), params=params)
         response.raise_for_status()
         return response.json()
 
@@ -49,6 +49,8 @@ class Jellyfin(MediaPlayer):
                 params["ParentId"] = library_id
                 params["UserId"] = user_id
                 params["IsMissing"] = False
+                params["Fields"] = "MediaSources",
+                params["Recursive"] = True
                 result = self._get(f"/Items", params)
                 items += result.get("Items", [])
         return items
@@ -56,7 +58,7 @@ class Jellyfin(MediaPlayer):
     @cached_property
     def not_watched_media(self) -> set[str]:
         not_watched = set()
-        items = self._get_items({"Filters": "IsUnplayed"})
+        items = self._get_items({"Filters": "IsUnplayed", "IncludeItemTypes": ["Episode", "Movie", "Video"]})
         for item in items:
             media_sources = item.get("MediaSources", [])
             for media in media_sources:
@@ -109,12 +111,13 @@ class Jellyfin(MediaPlayer):
 
             nextup_items = self._get("/Shows/NextUp", params).get("Items", [])
             
-            def get_episodes(season: int, index: int):
+            def get_episodes(season: int, index: int, limit: int = 25):
                 episode_params = {
                     "userId": user_id,
                     "enableUserData": "true",
                     "startIndex": index,
                     "season": season,
+                    "limit": limit,
                     "fields": "MediaSources",
                     "sortBy": "IndexNumber",
                     "sortOrder": "Ascending",
@@ -135,7 +138,7 @@ class Jellyfin(MediaPlayer):
 
                 start_index = item.get("IndexNumber", 1) - 1
                 season = item.get("SeasonNumber", 1)
-                episodes = get_episodes(season, start_index)
+                episodes = get_episodes(season, start_index, remaining)
 
                 while remaining and episodes:
                     for ep in episodes:
@@ -153,7 +156,7 @@ class Jellyfin(MediaPlayer):
                         
                     season += 1
                     start_index = 0
-                    episodes = get_episodes(season, start_index)
+                    episodes = get_episodes(season, start_index, remaining)
                     
 
         logging.info(
