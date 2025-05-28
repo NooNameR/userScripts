@@ -10,8 +10,6 @@ from datetime import datetime
 from collections import defaultdict
 from modules.config import Config, MovingMapping
 
-lock_file_path = '/tmp/cache_mover.lock'
-
 def sort_func(mapping: MovingMapping, key: str, inode_map: Dict[int, set[str]]) -> Tuple[int, int, int, float]:
     stat = helpers.get_stat(key)
     age_priority = 0 if mapping.is_file_within_age_range(key) else 1
@@ -181,6 +179,7 @@ if __name__ == "__main__":
     parser.add_argument("--dry-run", help="Dry-run mode", action="store_true", default=False)
     parser.add_argument("--log-level", type=str, help="Default logger level", choices=list(logging._nameToLevel.keys()), default="INFO")
     parser.add_argument("--log-file", type=str, help="Log filepath", required=False)
+    parser.add_argument("--lock-file", type=str, help="Lock filepath. For UNRAID use: '/var/run/mover.pid'", default="/tmp/cache_mover.lock")
     args = parser.parse_args()
     
     handlers = [logging.StreamHandler(sys.stdout)]
@@ -206,7 +205,7 @@ if __name__ == "__main__":
     config = Config(now, args.config)
     logging.info(config)
 
-    lock_file = open(lock_file_path, 'w')
+    lock_file = open(args.lock_file, 'w')
     try:
         fcntl.flock(lock_file, fcntl.LOCK_EX | fcntl.LOCK_NB)
     except BlockingIOError:
@@ -232,3 +231,4 @@ if __name__ == "__main__":
                 mapping.resume()
     finally:
         lock_file.close()
+        os.remove(lock_file.name)
