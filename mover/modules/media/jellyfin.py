@@ -32,17 +32,23 @@ class Jellyfin(MediaPlayer):
         response.raise_for_status()
         return response.json()
 
-    def _get_library_ids(self):
-        libraries = self._get("/Users/Me/Views").get("Items", [])
+    def _get_users(self):
+        all_users = self._get("/Users")
+        return [u for u in all_users if not self.users or u["Name"] in self.users]
+
+    def _get_library_ids(self, user_id):
+        libraries = self._get(f"/Users/{user_id}/Views").get("Items", [])
         return [lib["Id"] for lib in libraries if not self.libraries or lib["Name"] in self.libraries]
 
     def _get_items(self, filters):
         items = []
-        for library_id in self._get_library_ids():
-            params = filters.copy()
-            params["ParentId"] = library_id
-            result = self._get("/Items", params)
-            items.extend(result.get("Items", []))
+        for user in self._get_users():
+            user_id = user["Id"]
+            for library_id in self._get_library_ids(user_id):
+                params = filters.copy()
+                params["ParentId"] = library_id
+                result = self._get(f"/Users/{user_id}/Items", params)
+                items.extend(result.get("Items", []))
         return items
 
     @cached_property
@@ -82,25 +88,34 @@ class Jellyfin(MediaPlayer):
     def continue_watching(self) -> list[str]:
         result = OrderedDict()
         cutoff = self.now - timedelta(weeks=1)
-        items = self._get_items({"Filters": "IsResumable", "SortBy": "DatePlayed", "SortOrder": "Descending"})
+        for user in self._get_users():
+            user_id = user["Id"]
+            for library_id in self._get_library_ids(user_id):
+                params = {
+                    "ParentId": library_id,
+                    "Filters": "IsResumable",
+                    "SortBy": "DatePlayed",
+                    "SortOrder": "Descending"
+                }
+                items = self._get(f"/Users/{user_id}/Items", params).get("Items", [])
 
-        for item in items:
-            last_played = item.get("DatePlayed")
-            if not last_played:
-                continue
+                for item in items:
+                    last_played = item.get("DatePlayed")
+                    if not last_played:
+                        continue
 
-            try:
-                last_played_dt = datetime.fromisoformat(last_played.replace("Z", "+00:00"))
-                if last_played_dt < cutoff:
-                    continue
-            except Exception:
-                continue
+                    try:
+                        last_played_dt = datetime.fromisoformat(last_played.replace("Z", "+00:00"))
+                        if last_played_dt < cutoff:
+                            continue
+                    except Exception:
+                        continue
 
-            media_sources = item.get("MediaSources", [])
-            for media in media_sources:
-                path = self.rewriter.rewrite(media.get("Path", ""))
-                if not os.path.exists(path):
-                    result[path] = None
+                    media_sources = item.get("MediaSources", [])
+                    for media in media_sources:
+                        path = self.rewriter.rewrite(media.get("Path", ""))
+                        if not os.path.exists(path):
+                            result[path] = None
 
         logging.info("Detected %d watching files not currently available on source drives in Jellyfin library", len(result))
         return list(result.keys())

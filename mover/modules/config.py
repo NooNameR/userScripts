@@ -4,6 +4,7 @@ import os
 import shutil
 import logging
 from .media.plex import Plex
+from .media.jellyfin import Jellyfin
 from .media.media_player import MediaPlayer
 from .seeding.qbit import Qbit
 from .seeding.seeding_client import SeedingClient
@@ -40,7 +41,7 @@ class MovingMapping:
         self.min_age: int = parse(raw.get("min_age", "2h"))
         self.max_age: int = parse(raw.get("max_age")) if raw.get("max_age") else float('inf')
         self.clients: list[SeedingClient] = [Qbit(self.source, **client) for client in raw.get("clients", [])]
-        self.plex: list[MediaPlayer] = [Plex(self.now, self.source, **client) for client in raw.get("plex", [])]
+        self.media: list[MediaPlayer] = [Plex(self.now, self.source, **client) for client in raw.get("plex", [])] + [Jellyfin(self.now, self.source, **client) for client in raw.get("jellyfin", [])]
         self.ignores: set[str] = set(raw.get("ignore", []))
         
     def needs_moving(self) -> bool:
@@ -71,7 +72,7 @@ class MovingMapping:
     def eligible_for_source(self) -> list[str]:
         result = []
         
-        for file in [i for plex in self.plex for i in plex.continue_watching]:
+        for file in [i for plex in self.media for i in plex.continue_watching]:
             rel_path = os.path.relpath(file, self.source)
             path = os.path.join(self.destination, rel_path)
             
@@ -97,14 +98,14 @@ class MovingMapping:
             qbit.resume()
             
     def is_not_watched(self, file: str) -> bool:
-        for plex in self.plex:
-            if plex.is_not_watched(file):
+        for media in self.media:
+            if media.is_not_watched(file):
                 return True
         return False
     
     def is_active(self, file: str) -> bool:
-        for plex in self.plex:
-            if plex.is_active(file):
+        for media in self.media:
+            if media.is_active(file):
                 return True
         return False
         
@@ -127,6 +128,6 @@ class MovingMapping:
             f"       Cache Threshold: {self.cache_threshold:.4g}%\n"
             f"       Age range: {timedelta(seconds=self.min_age)} – {"..." if self.max_age == float('inf') else timedelta(seconds=self.max_age)}\n"
             f"       Clients: [{', '.join(map(str, self.clients))}]\n"
-            f"       Plex: [{', '.join(map(str, self.plex))}]\n"
+            f"       Plex: [{', '.join(map(str, self.media))}]\n"
             f"       Ignore patterns: [{', '.join(map(str, self.ignores))}]"
         )
