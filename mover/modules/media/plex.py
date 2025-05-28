@@ -1,13 +1,14 @@
 import sys
 import os
 import logging
-from .rewriter import Rewriter, RealRewriter, NoopRewriter
+from .media_player import MediaPlayer
+from ..rewriter import Rewriter, RealRewriter, NoopRewriter
 from typing import Dict
 from collections import OrderedDict
 from datetime import timedelta
 from functools import cached_property
 
-class PlexHelper:
+class Plex(MediaPlayer):
     def __init__(self, now, source: str, url: str, token: str, libraries: list[str] = [], users: list[str] = [], rewrite: Dict[str, str] = {}):
         self.now = now
         self.url = url

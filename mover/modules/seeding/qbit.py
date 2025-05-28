@@ -2,11 +2,12 @@ import os
 import sys
 import logging
 from functools import cached_property
-from .rewriter import Rewriter, RealRewriter, NoopRewriter
+from ..rewriter import Rewriter, RealRewriter, NoopRewriter
+from .seeding_client import SeedingClient
 from typing import Dict
-from .helpers import execute
+from ..helpers import execute
 
-class QbitHelper:
+class Qbit(SeedingClient):
     def __init__(self, source: str, host: str, user: str, password: str, rewrite: Dict[str, str] = {}):
         self.rewrite = rewrite
         self.host = host

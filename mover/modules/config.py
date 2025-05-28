@@ -1,11 +1,12 @@
 import pyaml_env
 import fnmatch
 import os
-import time
 import shutil
 import logging
-from .plex_helper import PlexHelper
-from .qbit_helper import QbitHelper
+from .media.plex import Plex
+from .media.media_player import MediaPlayer
+from .seeding.qbit import Qbit
+from .seeding.seeding_client import SeedingClient
 from .helpers import get_ctime
 from datetime import datetime, timedelta
 from pytimeparse2 import parse
@@ -38,8 +39,8 @@ class MovingMapping:
         self.cache_threshold: float = raw.get("cache_threshold", 0.0)
         self.min_age: int = parse(raw.get("min_age", "2h"))
         self.max_age: int = parse(raw.get("max_age")) if raw.get("max_age") else float('inf')
-        self.clients: list[QbitHelper] = [QbitHelper(self.source, **client) for client in raw.get("clients", [])]
-        self.plex: list[PlexHelper] = [PlexHelper(self.now, self.source, **client) for client in raw.get("plex", [])]
+        self.clients: list[SeedingClient] = [Qbit(self.source, **client) for client in raw.get("clients", [])]
+        self.plex: list[MediaPlayer] = [Plex(self.now, self.source, **client) for client in raw.get("plex", [])]
         self.ignores: set[str] = set(raw.get("ignore", []))
         
     def needs_moving(self) -> bool:
