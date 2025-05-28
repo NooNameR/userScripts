@@ -17,3 +17,8 @@ Run the script with your config file:
 ```bash
 python cache_mover.py --config config.yaml
 ```
+
+For UnRAID it is suggested to pass `--lock-file` to OS consider execution as native mover run:
+```bash
+python cache_mover.py --config config.yaml --lock-file /var/run/mover.pid
+```
