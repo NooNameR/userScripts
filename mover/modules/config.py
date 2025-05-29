@@ -97,7 +97,7 @@ class MovingMapping:
         for qbit in self.clients:
             qbit.resume()
             
-    def get_sort_key(self, path: str) -> Tuple[int, int, int, int, int, float]:
+    def get_sort_key(self, path: str) -> Tuple[int, int, int, int, int, int, float]:
         # ignored path, no point checking
         if self.is_ignored(path):
             return (0, 0, 0, 0, 0, 0)
@@ -122,7 +122,7 @@ class MovingMapping:
 
         completion_age, num_seeders = min(qbit_results, default=(0, 0))
         plex_key = max(plex_results, default = 0)
-        has_torrent = 0 if qbit_results else 1
+        has_torrent = 1 if qbit_results else 0
         
         return (
             age_priority,       # 1. age_priority (0 if within age range, else 1)
@@ -130,7 +130,8 @@ class MovingMapping:
             has_torrent,        # 3. has_torrent (0 if has torrents, else 1)
             -completion_age,    # 4. -completion_age (negative to prioritize older completion age)
             -num_seeders,       # 5. -num_seeders (negative to prioritize more seeders)
-            get_ctime(path)     # 6. ctime (file creation time as tiebreaker)
+            len(qbit_results),  # 6. num seeding torrents
+            get_ctime(path)     # 7. ctime (file creation time as tiebreaker)
         )
     
     def is_active(self, file: str) -> bool:

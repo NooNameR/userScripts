@@ -6,7 +6,7 @@ from ..rewriter import Rewriter
 from .seeding_client import SeedingClient
 from typing import Tuple, Set
 from collections import defaultdict
-from ..helpers import execute
+from ..helpers import execute, get_stat
 from datetime import datetime
 
 class Qbit(SeedingClient):
@@ -51,19 +51,21 @@ class Qbit(SeedingClient):
                     for root, _, files in os.walk(path):
                         for file in files:
                             full_path = os.path.join(root, file)
-                            result[full_path].append(torrent)
+                            result[get_stat(full_path).st_ino].append(torrent)
                 else:
-                    result[path].append(torrent)
+                    result[get_stat(path).st_ino].append(torrent)
                     
         logging.info(f"Found %d torrents on source", total)
 
         return result
     
     def get_sort_key(self, path: str) -> Set[Tuple[int, int]]:
-        return {(self.now - torrent.completion_on, torrent.num_seeds) for torrent in self.__torrents[path]}
+        inode = get_stat(path).st_ino
+        return {(self.now - torrent.completion_on, torrent.num_seeds) for torrent in self.__torrents[inode]}
         
     def pause(self, path: str):
-        for torrent in self.__torrents[path]:
+        inode = get_stat(path).st_ino
+        for torrent in self.__torrents[inode]:
             if torrent in self.paused_torrents:
                 continue
             
