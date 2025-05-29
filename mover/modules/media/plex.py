@@ -3,19 +3,19 @@ import os
 import logging
 from .media_player import MediaPlayer, MediaPlayerType
 from ..rewriter import Rewriter
-from typing import Dict
+from typing import Set, List
 from collections import OrderedDict
-from datetime import timedelta
+from datetime import datetime, timedelta
 from functools import cached_property
 
 class Plex(MediaPlayer):
-    def __init__(self, now, rewriter: Rewriter, url: str, token: str, libraries: list[str] = [], users: list[str] = []):
-        self.now = now
-        self.rewriter = rewriter
-        self.url = url
-        self.token = token
-        self.libraries = set(libraries)
-        self.users = set(users)
+    def __init__(self, now: datetime, rewriter: Rewriter, url: str, token: str, libraries: List[str] = [], users: List[str] = []):
+        self.now: datetime  = now
+        self.rewriter: Rewriter = rewriter
+        self.url: str = url
+        self.token: str = token
+        self.libraries: Set[str] = set(libraries)
+        self.users: Set[str] = set(users)
         
     @cached_property
     def __plex(self):
@@ -37,7 +37,7 @@ class Plex(MediaPlayer):
         return PlexServer(self.url, token)
     
     @cached_property
-    def not_watched_media(self) -> set[str]:
+    def not_watched_media(self) -> Set[str]:
         not_watched = set()
         
         def __populate(item):
@@ -81,14 +81,14 @@ class Plex(MediaPlayer):
         
         return False
     
-    def __active_items(self) -> set[str]:
+    def __active_items(self) -> Set[str]:
         return set([session.ratingKey for session in self.__plex.sessions()])
-
-    def is_not_watched(self, file: str) -> bool:
-        return file in self.not_watched_media
+    
+    def get_sort_key(self, path: str) -> Set[int]:
+        return set([1 if path in self.not_watched_media else 0])
     
     @cached_property
-    def continue_watching(self) -> list[str]:
+    def continue_watching(self) -> List[str]:
         result = OrderedDict()
         cutoff = self.now - timedelta(weeks=1)
         active_items = self.__active_items()

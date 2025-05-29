@@ -5,17 +5,9 @@ import sys
 import logging
 from logging.handlers import RotatingFileHandler
 import modules.helpers as helpers
-from typing import Dict, Tuple
 from datetime import datetime
 from collections import defaultdict
 from modules.config import Config, MovingMapping
-
-def sort_func(mapping: MovingMapping, key: str, inode_map: Dict[int, set[str]]) -> Tuple[int, int, int, float]:
-    stat = helpers.get_stat(key)
-    age_priority = 0 if mapping.is_file_within_age_range(key) else 1
-    hardlinks = len(inode_map.get(stat.st_ino, []))
-    is_not_watched = 1 if mapping.is_not_watched(key) else 0
-    return (age_priority, hardlinks, is_not_watched, helpers.get_ctime(key))
 
 def move_to_destination(mapping: MovingMapping) -> int:
     total = 0
@@ -42,7 +34,7 @@ def move_to_destination(mapping: MovingMapping) -> int:
             
     processed = set()
     
-    for src_file in sorted(files_to_move, key = lambda item: sort_func(mapping, item, inodes_map)):
+    for src_file in sorted(files_to_move, key=mapping.get_sort_key):
         if src_file in processed:
             logging.debug("File was already processed: %s", src_file)
             continue

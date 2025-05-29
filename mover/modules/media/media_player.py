@@ -1,5 +1,6 @@
 from abc import ABC, abstractmethod
 from enum import Enum
+from typing import Set, Tuple
 
 class MediaPlayerType(Enum):
     PLEX = 1
@@ -11,9 +12,9 @@ class MediaPlayer(ABC):
         pass
     
     @abstractmethod
-    def is_not_watched(self, file: str) -> bool:
+    def type(self) -> MediaPlayerType:
         pass
     
     @abstractmethod
-    def type(self) -> MediaPlayerType:
+    def get_sort_key(self, path: str) -> Set[int]:
         pass

@@ -2,20 +2,20 @@ import os
 import requests
 import logging
 from .media_player import MediaPlayer, MediaPlayerType
-from ..rewriter import Rewriter, RealRewriter, NoopRewriter
-from typing import Dict
+from ..rewriter import Rewriter
+from typing import Set, List
 from collections import OrderedDict
 from datetime import timedelta, datetime
 from functools import cached_property
 
 class Jellyfin(MediaPlayer):
-    def __init__(self, now, rewriter: Rewriter, url: str, api_key: str, libraries: list[str] = [], users: list[str] = []):
-        self.now = now
-        self.rewriter = rewriter
-        self.url = url.rstrip('/')
-        self.api_key = api_key
-        self.libraries = set(libraries)
-        self.users = set(users)
+    def __init__(self, now: datetime, rewriter: Rewriter, url: str, api_key: str, libraries: List[str] = [], users: List[str] = []):
+        self.now: datetime = now
+        self.rewriter: Rewriter = rewriter
+        self.url: str = url.rstrip('/')
+        self.api_key: str = api_key
+        self.libraries: Set[str] = set(libraries)
+        self.users: Set[str] = set(users)
 
     def _headers(self):
         return {
@@ -42,7 +42,7 @@ class Jellyfin(MediaPlayer):
         return items
 
     @cached_property
-    def not_watched_media(self) -> set[str]:
+    def not_watched_media(self) -> Set[str]:
         not_watched = set()
         items = self._get_items({"Filters": "IsUnplayed"})
         for item in items:
@@ -59,8 +59,8 @@ class Jellyfin(MediaPlayer):
         logging.info("Found %d not-watched files in the Jellyfin library", len(not_watched))
         return not_watched
 
-    def is_not_watched(self, file: str) -> bool:
-        return file in self.not_watched_media
+    def get_sort_key(self, path: str) -> Set[int]:
+        return set([1 if path in self.not_watched_media else 0])
 
     def is_active(self, file: str) -> bool:
         sessions = self._get("/Sessions")
@@ -75,7 +75,7 @@ class Jellyfin(MediaPlayer):
         return False
 
     @cached_property
-    def continue_watching(self) -> list[str]:
+    def continue_watching(self) -> List[str]:
         result = OrderedDict()
         cutoff = self.now - timedelta(weeks=1)
         items = self._get_items({"Filters": "IsResumable", "SortBy": "DatePlayed", "SortOrder": "Descending"})

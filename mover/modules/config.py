@@ -9,7 +9,7 @@ from .seeding.qbit import Qbit
 from .seeding.seeding_client import SeedingClient
 from .helpers import get_ctime
 from datetime import datetime, timedelta
-from typing import Dict
+from typing import Dict, Tuple, Set, List
 from .rewriter import Rewriter, RealRewriter, NoopRewriter
 from pytimeparse2 import parse
 
@@ -18,7 +18,7 @@ class Config:
         self.now: datetime = now
         self.raw = pyaml_env.parse_config(path)
     
-        self.mappings: list["MovingMapping"] = [self.__parse_mapping(m) for m in self.raw.get("mappings", [])]
+        self.mappings: List["MovingMapping"] = [self.__parse_mapping(m) for m in self.raw.get("mappings", [])]
         
     def __parse_mapping(self, m) -> "MovingMapping":
         return MovingMapping(self.now, m)
@@ -41,9 +41,9 @@ class MovingMapping:
         self.cache_threshold: float = raw.get("cache_threshold", 0.0)
         self.min_age: int = parse(raw.get("min_age", "2h"))
         self.max_age: int = parse(raw.get("max_age")) if raw.get("max_age") else float('inf')
-        self.clients: list[SeedingClient] = [Qbit(rewriter=self.__parse_rewriter(self.source, self.destination, client.pop("rewrite", {})), **client) for client in raw.get("clients", [])]
-        self.plex: list[MediaPlayer] = [Plex(now=self.now, rewriter=self.__parse_rewriter(self.source, self.destination, client.pop("rewrite", {})), **client) for client in raw.get("plex", [])]
-        self.ignores: set[str] = set(raw.get("ignore", []))
+        self.clients: List[SeedingClient] = [Qbit(rewriter=self.__parse_rewriter(self.source, self.destination, client.pop("rewrite", {})), **client) for client in raw.get("clients", [])]
+        self.plex: List[MediaPlayer] = [Plex(now=self.now, rewriter=self.__parse_rewriter(self.source, self.destination, client.pop("rewrite", {})), **client) for client in raw.get("plex", [])]
+        self.ignores: Set[str] = set(raw.get("ignore", []))
         
     def __parse_rewriter(self, source: str, destination: str, rewrite: Dict[str, str] = {}) -> Rewriter:
         if rewrite and "from" in rewrite and "to" in rewrite:
@@ -77,7 +77,7 @@ class MovingMapping:
         logging.info("Space usage: %.4g%% is above cache threshold: %.4g%%. Skipping %s...", percent_used, self.cache_threshold, self.source)
         return False
     
-    def eligible_for_source(self) -> list[str]:
+    def eligible_for_source(self) -> List[str]:
         return [i for plex in self.plex for i in plex.continue_watching]
     
     def get_src_file(self, path: str) -> str:
@@ -96,11 +96,24 @@ class MovingMapping:
         for qbit in self.clients:
             qbit.resume()
             
-    def is_not_watched(self, file: str) -> bool:
+    def get_sort_key(self, path: str) -> Tuple[int, int]:
+        age_priority = 0 if self.is_file_within_age_range(path) else 1
+        
+        qbit_result: Set[Tuple[int, int]] = set()
+        for qbit in self.clients:
+           qbit_result.update(qbit.get_sort_key(path))
+           
+        if not qbit_result:
+            qbit_result.add((0, 0))
+            
+        plex_result: Set[int] = set()
         for plex in self.plex:
-            if plex.is_not_watched(file):
-                return True
-        return False
+            plex_result.update(plex.get_sort_key(path))
+        
+        if not plex_result:
+            plex_result.add(0)
+    
+        return (age_priority, sorted(plex_result)[0], *sorted(qbit_result)[0], get_ctime(path))
     
     def is_active(self, file: str) -> bool:
         for plex in self.plex:
