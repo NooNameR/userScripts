@@ -11,6 +11,7 @@ from .helpers import get_ctime
 from datetime import datetime, timedelta
 from typing import Dict, Tuple, Set, List
 from .rewriter import Rewriter, RealRewriter, NoopRewriter
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pytimeparse2 import parse
 
 class Config:
@@ -98,22 +99,25 @@ class MovingMapping:
             
     def get_sort_key(self, path: str) -> Tuple[int, int]:
         age_priority = 0 if self.is_file_within_age_range(path) else 1
-        
-        qbit_result: Set[Tuple[int, int]] = set()
-        for qbit in self.clients:
-           qbit_result.update(qbit.get_sort_key(path))
-           
-        if not qbit_result:
-            qbit_result.add((0, 0))
+        qbit_results: Set[Tuple[int, int]] = set()
+        plex_results: Set[int] = set()
+
+        with ThreadPoolExecutor(max_workers=3) as executor:
+            # Submit Qbit futures
+            qbit_futures = [executor.submit(qbit.get_sort_key, path) for qbit in self.clients]
+            plex_futures = [executor.submit(plex.get_sort_key, path) for plex in self.plex]
             
-        plex_result: Set[int] = set()
-        for plex in self.plex:
-            plex_result.update(plex.get_sort_key(path))
-        
-        if not plex_result:
-            plex_result.add(0)
+            for future in as_completed(qbit_futures):
+                qbit_results.update(future.result())
+
+            # Submit Plex futures
+            for future in as_completed(plex_futures):
+                plex_results.update(future.result())
+
+        qbit_key = sorted(qbit_results)[0] if qbit_results else (0, 0)
+        plex_key = sorted(plex_results)[0] if plex_results else 0
     
-        return (age_priority, sorted(plex_result)[0], *sorted(qbit_result)[0], get_ctime(path))
+        return (age_priority, plex_key, *qbit_key, get_ctime(path))
     
     def is_active(self, file: str) -> bool:
         for plex in self.plex:

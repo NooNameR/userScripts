@@ -7,7 +7,7 @@ from typing import Set, List
 from collections import OrderedDict
 from datetime import datetime, timedelta
 from functools import cached_property
-
+from concurrent.futures import ThreadPoolExecutor, as_completed
 class Plex(MediaPlayer):
     def __init__(self, now: datetime, rewriter: Rewriter, url: str, token: str, libraries: List[str] = [], users: List[str] = []):
         self.now: datetime  = now
@@ -38,31 +38,37 @@ class Plex(MediaPlayer):
     
     @cached_property
     def not_watched_media(self) -> Set[str]:
-        not_watched = set()
-        
-        def __populate(item):
-            for media in item.media:
-                for part in media.parts:
-                    path = self.rewriter.on_source(part.file)
-                    if os.path.exists(path):
-                        logging.debug("Non-Watched %s: %s (%s)", item.type, item.title, path)
-                        not_watched.add(path)
-        
-        for plex in self.__plex_servers:
-            for section in plex.library.sections():
-                if section.type not in {'movie', 'show'}:
-                    continue
-                
-                if self.libraries and section.title not in self.libraries:
-                    continue
-                
-                for item in section.search(unwatched=True):            
-                    if item.type == 'movie':
-                        __populate(item)
-                    elif item.type == 'show':
-                        for episode in item.episodes():
-                            __populate(episode)
-                       
+        with ThreadPoolExecutor(max_workers=3) as executor:
+            def __populate(item, result):
+                for media in item.media:
+                    for part in media.parts:
+                        path = self.rewriter.on_source(part.file)
+                        if os.path.exists(path):
+                            logging.debug("Non-Watched %s: %s (%s)", item.type, item.title, path)
+                            result.add(path)
+            
+            def process_server(server):
+                result = set()
+                for section in server.library.sections():
+                    if section.type not in {'movie', 'show'}:
+                        continue
+                    
+                    if self.libraries and section.title not in self.libraries:
+                        continue
+                    
+                    for item in section.search(unwatched=True):            
+                        if item.type == 'movie':
+                            __populate(item, result)
+                        elif item.type == 'show':
+                            for episode in item.episodes():
+                                __populate(episode, result)
+                return result
+            
+            not_watched = set()
+            futures = [executor.submit(process_server, server) for server in self.__plex_servers]
+            for future in as_completed(futures):
+                not_watched.update(future.result())
+            
         logging.info("Found %d not-watched files in the plex library", len(not_watched))
                                     
         return not_watched
@@ -89,24 +95,24 @@ class Plex(MediaPlayer):
     
     @cached_property
     def continue_watching(self) -> List[str]:
-        result = OrderedDict()
         cutoff = self.now - timedelta(weeks=1)
         active_items = self.__active_items()
         
-        def __populate_watching(item):
+        def __populate_watching(item, result):
             for media in item.media:
                 for part in media.parts:
                     path = self.rewriter.on_source(part.file)
                     destination_path = self.rewriter.on_destination(part.file)
                     if not os.path.exists(path) and os.path.exists(destination_path):
                         logging.debug("Watching not on source %s: %s (%s)", item.type, item.title, destination_path)
-                        result[destination_path] = None
+                        result.append(destination_path)
                         
-        def get_continue_watching(items):
+        def get_continue_watching(server):
+            result = []
             def should_skip(item):
                 return item.isWatched or item.ratingKey in active_items
                 
-            for item in sorted(items, key=lambda i: i.lastViewedAt or 0, reverse=True):
+            for item in sorted(server.continueWatching(), key=lambda i: i.lastViewedAt or 0, reverse=True):
                 if self.libraries and item.librarySectionTitle not in self.libraries:
                     logging.debug("Item: %s is in %s library skipping...", item.title, item.librarySectionTitle)
                     continue
@@ -117,7 +123,7 @@ class Plex(MediaPlayer):
                 
                 if item.type == 'movie':
                     if not should_skip(item):
-                        __populate_watching(item)
+                        __populate_watching(item, result)
                 elif item.type == 'episode':
                     remaining = 25
                     show = item.show()
@@ -126,11 +132,17 @@ class Plex(MediaPlayer):
                         if not remaining:
                             break
                         
-                        __populate_watching(episode)
+                        __populate_watching(episode, result)
                         remaining -= 1
+            return result
 
-        for server in self.__plex_servers:
-            get_continue_watching(server.continueWatching())
+        result = OrderedDict()
+        
+        with ThreadPoolExecutor(max_workers=3) as executor:
+            futures = [executor.submit(get_continue_watching, server) for server in self.__plex_servers]
+            for future in as_completed(futures):
+                for path in future.result():
+                    result[path] = None
     
         logging.info("Detected %d watching files not currently available on source drives in Plex library", len(result))
                     
