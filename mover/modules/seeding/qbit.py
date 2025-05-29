@@ -7,9 +7,11 @@ from .seeding_client import SeedingClient
 from typing import Tuple, Set
 from collections import defaultdict
 from ..helpers import execute
+from datetime import datetime
 
 class Qbit(SeedingClient):
-    def __init__(self, rewriter: Rewriter, host: str, user: str, password: str):
+    def __init__(self, now: datetime, rewriter: Rewriter, host: str, user: str, password: str):
+        self.now = now.timestamp()
         self.rewriter: Rewriter = rewriter
         self.host: str = host
         self.user: str = user
@@ -58,7 +60,7 @@ class Qbit(SeedingClient):
         return result
     
     def get_sort_key(self, path: str) -> Set[Tuple[int, int]]:
-        return {(torrent.completion_on, -torrent.num_seeds) for torrent in self.__torrents[path]}
+        return {(self.now - torrent.completion_on, torrent.num_seeds) for torrent in self.__torrents[path]}
         
     def pause(self, path: str):
         for torrent in self.__torrents[path]:

@@ -1,6 +1,5 @@
 from abc import ABC, abstractmethod
 from enum import Enum
-from typing import Set, Tuple
 
 class MediaPlayerType(Enum):
     PLEX = 1
@@ -16,5 +15,5 @@ class MediaPlayer(ABC):
         pass
     
     @abstractmethod
-    def get_sort_key(self, path: str) -> Set[int]:
+    def get_sort_key(self, path: str) -> int:
         pass

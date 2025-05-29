@@ -59,8 +59,8 @@ class Jellyfin(MediaPlayer):
         logging.info("Found %d not-watched files in the Jellyfin library", len(not_watched))
         return not_watched
 
-    def get_sort_key(self, path: str) -> Set[int]:
-        return set([1 if path in self.not_watched_media else 0])
+    def get_sort_key(self, path: str) -> int:
+        return 1 if path in self.not_watched_media else 0
 
     def is_active(self, file: str) -> bool:
         sessions = self._get("/Sessions")

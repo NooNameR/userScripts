@@ -42,7 +42,7 @@ class MovingMapping:
         self.cache_threshold: float = raw.get("cache_threshold", 0.0)
         self.min_age: int = parse(raw.get("min_age", "2h"))
         self.max_age: int = parse(raw.get("max_age")) if raw.get("max_age") else float('inf')
-        self.clients: List[SeedingClient] = [Qbit(rewriter=self.__parse_rewriter(self.source, self.destination, client.pop("rewrite", {})), **client) for client in raw.get("clients", [])]
+        self.clients: List[SeedingClient] = [Qbit(now=self.now, rewriter=self.__parse_rewriter(self.source, self.destination, client.pop("rewrite", {})), **client) for client in raw.get("clients", [])]
         self.plex: List[MediaPlayer] = [Plex(now=self.now, rewriter=self.__parse_rewriter(self.source, self.destination, client.pop("rewrite", {})), **client) for client in raw.get("plex", [])]
         self.ignores: Set[str] = set(raw.get("ignore", []))
         
@@ -97,7 +97,11 @@ class MovingMapping:
         for qbit in self.clients:
             qbit.resume()
             
-    def get_sort_key(self, path: str) -> Tuple[int, int]:
+    def get_sort_key(self, path: str) -> Tuple[int, int, int, int, int, float]:
+        # ignored path, no point checking
+        if self.is_ignored(path):
+            return (0, 0, 0, 0, 0, 0)
+        
         age_priority = 0 if self.is_file_within_age_range(path) else 1
         qbit_results: Set[Tuple[int, int]] = set()
         plex_results: Set[int] = set()
@@ -108,16 +112,26 @@ class MovingMapping:
             plex_futures = [executor.submit(plex.get_sort_key, path) for plex in self.plex]
             
             for future in as_completed(qbit_futures):
-                qbit_results.update(future.result())
+                result = future.result()
+                if result:
+                    qbit_results.add((min(a for a, _ in result), min(n for _, n in result)))
 
             # Submit Plex futures
             for future in as_completed(plex_futures):
-                plex_results.update(future.result())
+                plex_results.add(future.result())
 
-        qbit_key = sorted(qbit_results)[0] if qbit_results else (0, 0)
-        plex_key = sorted(plex_results)[0] if plex_results else 0
-    
-        return (age_priority, plex_key, *qbit_key, get_ctime(path))
+        completion_age, num_seeders = min(qbit_results, default=(0, 0))
+        plex_key = max(plex_results, default = 0)
+        has_torrent = 0 if qbit_results else 1
+        
+        return (
+            age_priority,       # 1. age_priority (0 if within age range, else 1)
+            plex_key,           # 2. plex un-watched -> 1, watched 0
+            has_torrent,        # 3. has_torrent (0 if has torrents, else 1)
+            -completion_age,    # 4. -completion_age (negative to prioritize older completion age)
+            -num_seeders,       # 5. -num_seeders (negative to prioritize more seeders)
+            get_ctime(path)     # 6. ctime (file creation time as tiebreaker)
+        )
     
     def is_active(self, file: str) -> bool:
         for plex in self.plex:

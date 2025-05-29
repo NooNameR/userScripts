@@ -90,8 +90,8 @@ class Plex(MediaPlayer):
     def __active_items(self) -> Set[str]:
         return set([session.ratingKey for session in self.__plex.sessions()])
     
-    def get_sort_key(self, path: str) -> Set[int]:
-        return set([1 if path in self.not_watched_media else 0])
+    def get_sort_key(self, path: str) -> int:
+        return 1 if path in self.not_watched_media else 0
     
     @cached_property
     def continue_watching(self) -> List[str]:
