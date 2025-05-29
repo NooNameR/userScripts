@@ -2,24 +2,20 @@ import sys
 import os
 import logging
 from .media_player import MediaPlayer, MediaPlayerType
-from ..rewriter import Rewriter, RealRewriter, NoopRewriter
+from ..rewriter import Rewriter
 from typing import Dict
 from collections import OrderedDict
 from datetime import timedelta
 from functools import cached_property
 
 class Plex(MediaPlayer):
-    def __init__(self, now, source: str, url: str, token: str, libraries: list[str] = [], users: list[str] = [], rewrite: Dict[str, str] = {}):
+    def __init__(self, now, rewriter: Rewriter, url: str, token: str, libraries: list[str] = [], users: list[str] = []):
         self.now = now
+        self.rewriter = rewriter
         self.url = url
         self.token = token
         self.libraries = set(libraries)
         self.users = set(users)
-        if rewrite and "from" in rewrite and "to" in rewrite:
-            src, dst = rewrite["from"], rewrite["to"]
-            self.rewriter: Rewriter = RealRewriter(source, src, dst)
-        else:
-            self.rewriter: Rewriter = NoopRewriter()
         
     @cached_property
     def __plex(self):
@@ -44,12 +40,12 @@ class Plex(MediaPlayer):
     def not_watched_media(self) -> set[str]:
         not_watched = set()
         
-        def __populate_watched(item):
+        def __populate(item):
             for media in item.media:
                 for part in media.parts:
-                    path = self.rewriter.rewrite(part.file)
+                    path = self.rewriter.on_source(part.file)
                     if os.path.exists(path):
-                        logging.debug("Watched %s: %s (%s)", item.type, item.title, path)
+                        logging.debug("Non-Watched %s: %s (%s)", item.type, item.title, path)
                         not_watched.add(path)
         
         for plex in self.__plex_servers:
@@ -62,10 +58,10 @@ class Plex(MediaPlayer):
                 
                 for item in section.search(unwatched=True):            
                     if item.type == 'movie':
-                        __populate_watched(item)
+                        __populate(item)
                     elif item.type == 'show':
                         for episode in item.episodes():
-                            __populate_watched(episode)
+                            __populate(episode)
                        
         logging.info("Found %d not-watched files in the plex library", len(not_watched))
                                     
@@ -79,7 +75,7 @@ class Plex(MediaPlayer):
                     if not part.file:
                         continue
 
-                    path = self.rewriter.rewrite(part.file)
+                    path = self.rewriter.on_source(part.file)
                     if os.path.exists(path) and os.path.samefile(path, file):
                         return True
         
@@ -100,10 +96,11 @@ class Plex(MediaPlayer):
         def __populate_watching(item):
             for media in item.media:
                 for part in media.parts:
-                    path = self.rewriter.rewrite(part.file)
-                    if not os.path.exists(path):
-                        logging.debug("Watching not on source %s: %s (%s)", item.type, item.title, path)
-                        result[path] = None
+                    path = self.rewriter.on_source(part.file)
+                    destination_path = self.rewriter.on_destination(part.file)
+                    if not os.path.exists(path) and os.path.exists(destination_path):
+                        logging.debug("Watching not on source %s: %s (%s)", item.type, item.title, destination_path)
+                        result[destination_path] = None
                         
         def get_continue_watching(items):
             def should_skip(item):

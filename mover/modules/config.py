@@ -9,6 +9,8 @@ from .seeding.qbit import Qbit
 from .seeding.seeding_client import SeedingClient
 from .helpers import get_ctime
 from datetime import datetime, timedelta
+from typing import Dict
+from .rewriter import Rewriter, RealRewriter, NoopRewriter
 from pytimeparse2 import parse
 
 class Config:
@@ -39,9 +41,16 @@ class MovingMapping:
         self.cache_threshold: float = raw.get("cache_threshold", 0.0)
         self.min_age: int = parse(raw.get("min_age", "2h"))
         self.max_age: int = parse(raw.get("max_age")) if raw.get("max_age") else float('inf')
-        self.clients: list[SeedingClient] = [Qbit(self.source, **client) for client in raw.get("clients", [])]
-        self.plex: list[MediaPlayer] = [Plex(self.now, self.source, **client) for client in raw.get("plex", [])]
+        self.clients: list[SeedingClient] = [Qbit(rewriter=self.__parse_rewriter(self.source, self.destination, client.pop("rewrite", {})), **client) for client in raw.get("clients", [])]
+        self.plex: list[MediaPlayer] = [Plex(now=self.now, rewriter=self.__parse_rewriter(self.source, self.destination, client.pop("rewrite", {})), **client) for client in raw.get("plex", [])]
         self.ignores: set[str] = set(raw.get("ignore", []))
+        
+    def __parse_rewriter(self, source: str, destination: str, rewrite: Dict[str, str] = {}) -> Rewriter:
+        if rewrite and "from" in rewrite and "to" in rewrite:
+            src, dst = rewrite["from"], rewrite["to"]
+            return RealRewriter(source, destination, src, dst)
+        else:
+            return NoopRewriter(source, destination)
         
     def needs_moving(self) -> bool:
         total, used, _ = shutil.disk_usage(self.source)
@@ -69,16 +78,7 @@ class MovingMapping:
         return False
     
     def eligible_for_source(self) -> list[str]:
-        result = []
-        
-        for file in [i for plex in self.plex for i in plex.continue_watching]:
-            rel_path = os.path.relpath(file, self.source)
-            path = os.path.join(self.destination, rel_path)
-            
-            if os.path.exists(path):
-                result.append(path)
-        
-        return result
+        return [i for plex in self.plex for i in plex.continue_watching]
     
     def get_src_file(self, path: str) -> str:
         rel_path = os.path.relpath(path, self.destination)

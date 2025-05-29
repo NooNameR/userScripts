@@ -9,17 +9,13 @@ from datetime import timedelta, datetime
 from functools import cached_property
 
 class Jellyfin(MediaPlayer):
-    def __init__(self, now, source: str, url: str, api_key: str, libraries: list[str] = [], users: list[str] = [], rewrite: Dict[str, str] = {}):
+    def __init__(self, now, rewriter: Rewriter, url: str, api_key: str, libraries: list[str] = [], users: list[str] = []):
         self.now = now
+        self.rewriter = rewriter
         self.url = url.rstrip('/')
         self.api_key = api_key
         self.libraries = set(libraries)
         self.users = set(users)
-        if rewrite and "from" in rewrite and "to" in rewrite:
-            src, dst = rewrite["from"], rewrite["to"]
-            self.rewriter: Rewriter = RealRewriter(source, src, dst)
-        else:
-            self.rewriter: Rewriter = NoopRewriter()
 
     def _headers(self):
         return {
@@ -55,7 +51,7 @@ class Jellyfin(MediaPlayer):
                 file_path = media.get("Path")
                 if not file_path:
                     continue
-                path = self.rewriter.rewrite(file_path)
+                path = self.rewriter.on_source(file_path)
                 if os.path.exists(path):
                     logging.debug("Unwatched %s: %s (%s)", item.get("Type"), item.get("Name"), path)
                     not_watched.add(path)
@@ -73,7 +69,7 @@ class Jellyfin(MediaPlayer):
             if now_playing:
                 media_sources = now_playing.get("MediaSources", [])
                 for media in media_sources:
-                    path = self.rewriter.rewrite(media.get("Path", ""))
+                    path = self.rewriter.on_source(media.get("Path", ""))
                     if os.path.exists(path) and os.path.samefile(path, file):
                         return True
         return False
@@ -99,8 +95,9 @@ class Jellyfin(MediaPlayer):
             media_sources = item.get("MediaSources", [])
             for media in media_sources:
                 path = self.rewriter.rewrite(media.get("Path", ""))
-                if not os.path.exists(path):
-                    result[path] = None
+                destination_path = self.rewriter.on_destination(media.get("Path", ""))
+                if not os.path.exists(path) and os.path.exists(destination_path):
+                    result[destination_path] = None
 
         logging.info("Detected %d watching files not currently available on source drives in Jellyfin library", len(result))
         return list(result.keys())

@@ -2,21 +2,17 @@ import os
 import sys
 import logging
 from functools import cached_property
-from ..rewriter import Rewriter, RealRewriter, NoopRewriter
+from ..rewriter import Rewriter
 from .seeding_client import SeedingClient
 from typing import Dict
 from ..helpers import execute
 
 class Qbit(SeedingClient):
-    def __init__(self, source: str, host: str, user: str, password: str, rewrite: Dict[str, str] = {}):
-        self.rewrite = rewrite
+    def __init__(self, rewriter: Rewriter, host: str, user: str, password: str):
+        self.rewriter = rewriter
         self.host = host
         self.user = user
-        if rewrite and "from" in rewrite and "to" in rewrite:
-            src, dst = rewrite["from"], rewrite["to"]
-            self.rewriter: Rewriter = RealRewriter(source, src, dst)
-        else:
-            self.rewriter: Rewriter = NoopRewriter()
+        self.rewriter = rewriter
         self.password = password
         self.torrents = []
         self.paused_torrents = []
@@ -45,11 +41,11 @@ class Qbit(SeedingClient):
             return self.torrents
         
         self.torrents = self.__filter(self.__client.torrents.info(status_filter="completed", sort="added_on", reverse=True))
-        logging.debug(f"Found %d torrents", len(self.torrents))
+        logging.info(f"Found %d torrents on source", len(self.torrents))
         return self.torrents
     
     def __cache_path(self, torrent) -> str:
-        return self.rewriter.rewrite(torrent.content_path)
+        return self.rewriter.on_source(torrent.content_path)
             
     def __filter(self, torrents):
         result = []
