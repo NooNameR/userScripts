@@ -27,7 +27,7 @@ class Plex(MediaPlayer):
         
         return [plex] + [plex.switchUser(u) for u in plex.myPlexAccount().users() if not self.users or u.username in self.users]
     
-    def get_plex_server(self, token):
+    def get_plex_server(self, token: str):
         try:
             from plexapi.server import PlexServer
         except ModuleNotFoundError:
@@ -120,7 +120,7 @@ class Plex(MediaPlayer):
                     if source_path in self.__continue_watching_on_source:
                         continue
                     
-                    detination_path = self.rewriter.on_destination(item)
+                    detination_path = self.rewriter.on_destination(path)
                     if not os.path.exists(detination_path):
                         continue
                     result.append(detination_path)
@@ -135,11 +135,11 @@ class Plex(MediaPlayer):
         active_items = self.__active_items()
         
         def __populate_watching(item):
-            result: Set[str] = set()
-            for media in item.media:
-                for part in media.parts:
-                    result.add(part.file)
-            return result
+            return {
+                part.file
+                for media in item.media
+                for part in media.parts
+            }
 
         def get_continue_watching(server):
             result = []

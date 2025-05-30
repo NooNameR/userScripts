@@ -44,17 +44,12 @@ def move_to_destination(mapping: MovingMapping) -> int:
             continue
         
         # Check if the file is within the age range
-        if not mapping.is_file_within_age_range(src_file):
-            logging.debug("Skipping file (out of age range): %s", src_file)
-            continue
-        
-        # Check if the file is within the age range
         if not mapping.needs_moving():
             logging.debug("Stopping mover, source: %s is below the threshold", mapping.source)
             break
         
         if mapping.is_active(src_file):
-            logging.info("Skipping file, currently is being played on Plex: %s", src_file)
+            logging.info("Skipping file, currently is being actively used: %s", src_file)
             continue
         
         stat = helpers.get_stat(src_file)

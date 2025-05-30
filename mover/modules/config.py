@@ -7,7 +7,7 @@ from .media.plex import Plex
 from .media.media_player import MediaPlayer
 from .seeding.qbit import Qbit
 from .seeding.seeding_client import SeedingClient
-from .helpers import get_ctime
+from .helpers import get_ctime, get_stat
 from datetime import datetime, timedelta
 from typing import Dict, Tuple, Set, List
 from .rewriter import Rewriter, RealRewriter, NoopRewriter
@@ -102,7 +102,11 @@ class MovingMapping:
         if self.is_ignored(path):
             return (0, 0, 0, 0, 0, 0)
         
-        age_priority = 0 if self.is_file_within_age_range(path) else 1
+        def within_range(age: float):
+            return self.min_age <= age <= self.max_age
+        
+        ctime = get_ctime(path)
+        age_priority = 0 if within_range(self.now.timestamp() - ctime) else 1
         qbit_results: Set[Tuple[int, int]] = set()
         plex_results: Set[int] = set()
 
@@ -123,6 +127,7 @@ class MovingMapping:
         completion_age, num_seeders = min(qbit_results, default=(0, 0))
         plex_key = max(plex_results, default = 0)
         has_torrent = 1 if qbit_results else 0
+        size = get_stat(path).st_size
         
         return (
             age_priority,       # 1. age_priority (0 if within age range, else 1)
@@ -131,7 +136,8 @@ class MovingMapping:
             -completion_age,    # 4. -completion_age (negative to prioritize older completion age)
             -num_seeders,       # 5. -num_seeders (negative to prioritize more seeders)
             len(qbit_results),  # 6. num seeding torrents
-            get_ctime(path)     # 7. ctime (file creation time as tiebreaker)
+            -size,              # 7. bigger file goes first
+            ctime               # 8. ctime (file creation time as tiebreaker)
         )
     
     def is_active(self, file: str) -> bool:
@@ -145,10 +151,6 @@ class MovingMapping:
             return False
         
         return any(fnmatch.fnmatch(path, pattern) for pattern in self.ignores)
-    
-    def is_file_within_age_range(self, filepath: str) -> bool:
-        file_age = self.now.timestamp() - get_ctime(filepath)
-        return self.min_age <= file_age <= self.max_age
     
     def __str__(self) -> str:
         return (
