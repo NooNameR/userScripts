@@ -90,23 +90,57 @@ class Plex(MediaPlayer):
     def __active_items(self) -> Set[str]:
         return set([session.ratingKey for session in self.__plex.sessions()])
     
+    @cached_property
+    def __continue_watching_on_source(self) -> Set[str]:
+        return {
+            self.rewriter.on_source(path)
+            for bucket in self.__continue_watching
+            for media in bucket
+            for path in media
+            if os.path.exists(self.rewriter.on_source(path))
+        }
+        
     def get_sort_key(self, path: str) -> int:
-        return 1 if path in self.not_watched_media else 0
+        return (1 if path in self.not_watched_media else 0) + (1 if path in self.__continue_watching_on_source else 0)
+    
+    def continue_watching(self) -> List[str]:
+        result: List[str] = []
+        max_count: int = 25
+        
+        for bucket in self.__continue_watching:
+            remaining = max_count
+            for item in bucket:
+                if not remaining:
+                    break
+                
+                remaining -= 1
+                
+                for path in item:
+                    source_path = self.rewriter.on_source(path)
+                    if source_path in self.__continue_watching_on_source:
+                        continue
+                    
+                    detination_path = self.rewriter.on_destination(item)
+                    if not os.path.exists(detination_path):
+                        continue
+                    result.append(detination_path)
+                
+        logging.info("Detected %d watching files not currently available on source drives in Plex library", len(result))
+        
+        return result
     
     @cached_property
-    def continue_watching(self) -> List[str]:
+    def __continue_watching(self) -> List[List[Set[str]]]:
         cutoff = self.now - timedelta(weeks=1)
         active_items = self.__active_items()
         
-        def __populate_watching(item, result):
+        def __populate_watching(item):
+            result: Set[str] = set()
             for media in item.media:
                 for part in media.parts:
-                    path = self.rewriter.on_source(part.file)
-                    destination_path = self.rewriter.on_destination(part.file)
-                    if not os.path.exists(path) and os.path.exists(destination_path):
-                        logging.debug("Watching not on source %s: %s (%s)", item.type, item.title, destination_path)
-                        result.append(destination_path)
-                        
+                    result.add(part.file)
+            return result
+
         def get_continue_watching(server):
             result = []
             def should_skip(item):
@@ -123,30 +157,39 @@ class Plex(MediaPlayer):
                 
                 if item.type == 'movie':
                     if not should_skip(item):
-                        __populate_watching(item, result)
+                        result.append([__populate_watching(item)])
                 elif item.type == 'episode':
-                    remaining = 25
                     show = item.show()
                     key = (item.seasonNumber, item.index + 1) if should_skip(item) else (item.seasonNumber, item.index)
+                    temp = []
                     for episode in sorted([e for e in show.episodes() if (e.seasonNumber, e.index) >= key], key=lambda e: (e.seasonNumber, e.index)):
-                        if not remaining:
-                            break
-                        
-                        __populate_watching(episode, result)
-                        remaining -= 1
+                        temp.append(__populate_watching(episode))
+                    result.append(temp)
             return result
 
-        result = OrderedDict()
+        result: List[str] = []
         
         with ThreadPoolExecutor(max_workers=3) as executor:
+            processed: Set[str] = set()
             futures = [executor.submit(get_continue_watching, server) for server in self.__plex_servers]
+            
             for future in as_completed(futures):
-                for path in future.result():
-                    result[path] = None
-    
-        logging.info("Detected %d watching files not currently available on source drives in Plex library", len(result))
+                for bucket in future.result():
+                    temp: List[Set[str]] = []
+                    for media in bucket:
+                        m: Set[str] = set()
+                        for path in media:
+                            if path in processed:
+                                continue
+                            processed.add(path)
+                            m.add(path)
+                        temp.append(m)
                     
-        return list(result.keys())
+                    result.append(temp)
+    
+        logging.info("Detected %d watching files in Plex library", len(result))
+                    
+        return result
     
     def __str__(self):
         return self.url

@@ -79,7 +79,7 @@ class MovingMapping:
         return False
     
     def eligible_for_source(self) -> List[str]:
-        return [i for plex in self.plex for i in plex.continue_watching]
+        return [i for plex in self.plex for i in plex.continue_watching()]
     
     def get_src_file(self, path: str) -> str:
         rel_path = os.path.relpath(path, self.destination)
