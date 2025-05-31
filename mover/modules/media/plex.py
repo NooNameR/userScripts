@@ -4,7 +4,7 @@ import logging
 from .media_player import MediaPlayer, MediaPlayerType
 from ..rewriter import Rewriter
 from typing import Set, List
-from collections import OrderedDict
+from queue import PriorityQueue
 from datetime import datetime, timedelta
 from functools import cached_property
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -133,6 +133,7 @@ class Plex(MediaPlayer):
     def __continue_watching(self) -> List[List[Set[str]]]:
         cutoff = self.now - timedelta(weeks=1)
         active_items = self.__active_items()
+        pq = PriorityQueue()
         
         def __populate_watching(item):
             return {
@@ -142,7 +143,6 @@ class Plex(MediaPlayer):
             }
 
         def get_continue_watching(server):
-            result = []
             def should_skip(item):
                 return item.isWatched or item.ratingKey in active_items
                 
@@ -157,35 +157,34 @@ class Plex(MediaPlayer):
                 
                 if item.type == 'movie':
                     if not should_skip(item):
-                        result.append([__populate_watching(item)])
+                        pq.put((-item.lastViewedAt.timestamp(), [__populate_watching(item)]))
                 elif item.type == 'episode':
                     show = item.show()
                     key = (item.seasonNumber, item.index + 1) if should_skip(item) else (item.seasonNumber, item.index)
                     temp = []
                     for episode in sorted([e for e in show.episodes() if (e.seasonNumber, e.index) >= key], key=lambda e: (e.seasonNumber, e.index)):
                         temp.append(__populate_watching(episode))
-                    result.append(temp)
-            return result
-
-        result: List[str] = []
+                    pq.put((-item.lastViewedAt.timestamp(), temp))
         
         with ThreadPoolExecutor(max_workers=3) as executor:
-            processed: Set[str] = set()
-            futures = [executor.submit(get_continue_watching, server) for server in self.__plex_servers]
+            for future in [executor.submit(get_continue_watching, server) for server in self.__plex_servers]:
+                future.result()
             
-            for future in as_completed(futures):
-                for bucket in future.result():
-                    temp: List[Set[str]] = []
-                    for media in bucket:
-                        m: Set[str] = set()
-                        for path in media:
-                            if path in processed:
-                                continue
-                            processed.add(path)
-                            m.add(path)
-                        temp.append(m)
-                    
-                    result.append(temp)
+        result: List[List[Set[str]]] = []
+        processed: Set[str] = set()
+        while not pq.empty():
+            _, media_list = pq.get()
+            temp: List[Set[str]] = []
+            for media in media_list:
+                m: Set[str] = set()
+                for path in media:
+                    if path in processed:
+                        continue
+                    processed.add(path)
+                    m.add(path)
+                temp.append(m)
+            
+            result.append(temp)
     
         logging.info("Detected %d watching files in Plex library", len(result))
                     
