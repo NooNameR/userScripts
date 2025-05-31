@@ -41,21 +41,31 @@ class Qbit(SeedingClient):
     def __torrents(self):
         torrents = self.__client.torrents.info(status_filter="completed", sort="completion_on", reverse=True)
         
+        def __populate(path, torrent):
+            if not os.path.exists(path):
+                return 0
+            if os.path.isdir(path):
+                for root, _, files in os.walk(path):
+                    for file in files:
+                        full_path = os.path.join(root, file)
+                        result[get_stat(full_path).st_ino].append(torrent)
+            else:
+                result[get_stat(path).st_ino].append(torrent)
+                
+            return 1
+        
         result = defaultdict(list)
         total = 0
         for torrent in torrents:
-            path = self.rewriter.on_source(torrent.content_path)
-            if os.path.exists(path):
-                total += 1
-                if os.path.isdir(path):
-                    for root, _, files in os.walk(path):
-                        for file in files:
-                            full_path = os.path.join(root, file)
-                            result[get_stat(full_path).st_ino].append(torrent)
-                else:
-                    result[get_stat(path).st_ino].append(torrent)
-                    
+            total += __populate(self.rewriter.on_source(torrent.content_path), torrent)
+        
         logging.info(f"Found %d torrents on source", total)
+            
+        total = 0
+        for torrent in torrents:
+            total += __populate(self.rewriter.on_destination(torrent.content_path), torrent)
+        
+        logging.info(f"Found %d torrents on destination", total)     
 
         return result
     

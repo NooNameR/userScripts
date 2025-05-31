@@ -6,35 +6,15 @@ import logging
 from logging.handlers import RotatingFileHandler
 import modules.helpers as helpers
 from datetime import datetime
+from typing import Callable, Dict, Set, Iterable
 from collections import defaultdict
 from modules.config import Config, MovingMapping
 
-def move_to_destination(mapping: MovingMapping) -> int:
-    total = 0
+def move_files(mapping: MovingMapping, files: Iterable[str], inodes: Dict[int, Set[str]], dest_func: Callable[[str], str], can_move: Callable[[], bool]) -> int:
+    total: int = 0
+    processed: Set[str] = set()
     
-    if not mapping.needs_moving():
-        logging.debug("Stopping mover, source: %s is below the threshold", mapping.source)
-        return total
-    
-    inodes_map = defaultdict(set)
-    files_to_move = set()
-    logging.info("Scanning %s...", mapping.source)
-    
-    for root, dirs, files in os.walk(mapping.source):
-        dirs.sort()
-
-        for file in files:
-            src_file = os.path.join(root, file)
-        
-            # Get the inode of the source file
-            inode = helpers.get_stat(src_file).st_ino
-
-            files_to_move.add(src_file)
-            inodes_map[inode].add(src_file)
-            
-    processed = set()
-    
-    for src_file in sorted(files_to_move, key=mapping.get_sort_key):
+    for src_file in files:
         if src_file in processed:
             logging.debug("File was already processed: %s", src_file)
             continue
@@ -44,8 +24,8 @@ def move_to_destination(mapping: MovingMapping) -> int:
             continue
         
         # Check if the file is within the age range
-        if not mapping.needs_moving():
-            logging.debug("Stopping mover, source: %s is below the threshold", mapping.source)
+        if not can_move():
+            logging.debug("Stopping mover...")
             break
         
         if mapping.is_active(src_file):
@@ -56,7 +36,7 @@ def move_to_destination(mapping: MovingMapping) -> int:
     
         mapping.pause(src_file)
         
-        dest_file = mapping.get_dest_file(src_file)
+        dest_file = dest_func(src_file)
         # Skip if the file already exists in the destination with the same size
         if helpers.is_same_file(src_file, dest_file):
             logging.info("Skipping existing file: %s", dest_file)
@@ -65,11 +45,11 @@ def move_to_destination(mapping: MovingMapping) -> int:
         
         processed.add(src_file)
         
-        for link_src_file in inodes_map.get(stat.st_ino, set()):
+        for link_src_file in inodes.get(stat.st_ino, set()):
             if link_src_file in processed:
                 continue
             
-            link_dest_file = mapping.get_dest_file(link_src_file)
+            link_dest_file = dest_func(link_src_file)
             mapping.pause(link_src_file)
             if helpers.is_same_file(link_src_file, link_dest_file):
                 logging.info("Skipping existing file: %s", link_dest_file)
@@ -88,73 +68,58 @@ def move_to_destination(mapping: MovingMapping) -> int:
         helpers.delete_file(src_file)
         total += stat.st_size
     
+    return total
+
+def move_to_destination(mapping: MovingMapping) -> int:    
+    if not mapping.needs_moving():
+        logging.debug("Stopping mover, source: %s is below the threshold", mapping.source)
+        return 0
+    
+    inodes_map = defaultdict(set)
+    files_to_move = set()
+    logging.info("Scanning %s...", mapping.source)
+    
+    for root, dirs, files in os.walk(mapping.source):
+        dirs.sort()
+
+        for file in files:
+            src_file = os.path.join(root, file)
+        
+            # Get the inode of the source file
+            inode = helpers.get_stat(src_file).st_ino
+
+            files_to_move.add(src_file)
+            inodes_map[inode].add(src_file)
+    
+    total = move_files(mapping, sorted(files_to_move, key=mapping.get_sort_key), inodes_map, mapping.get_dest_file, mapping.needs_moving)
+    
     helpers.delete_empty_dirs(mapping.source, mapping.is_ignored)
     
     return total
 
 def move_to_source(mapping: MovingMapping) -> int:
-    total = 0
     if not mapping.can_move_to_source():
-        return total
+        return 0
     
     files_to_move = mapping.eligible_for_source()
     if not files_to_move:
-        return total
+        return 0
     
     logging.info("Scanning %s...", mapping.destination)
     
-    inode_map = {helpers.get_stat(f).st_ino: set() for f in files_to_move}
+    inodes_map = {helpers.get_stat(f).st_ino: set() for f in files_to_move}
     for root, dirs, files in os.walk(mapping.destination):
         dirs.sort()
-                
+
         for file in files:
             src_file = os.path.join(root, file)
 
             # Get the inode of the source file
             inode = helpers.get_stat(src_file).st_ino
-            if inode in inode_map:
-                inode_map[inode].add(src_file)
-    
-    processed = set()
-    for src_file in files_to_move:
-        if src_file in processed:
-            logging.debug("File was already processed: %s", src_file)
-            continue
-        
-        if mapping.is_ignored(src_file):
-            logging.debug("File is ignored: %s", src_file)
-            continue
-        
-        if not mapping.can_move_to_source():
-            logging.debug("Stopping mover, source: %s is above the threshold", mapping.source)
-            break
-        
-        stat = helpers.get_stat(src_file)
-        dest_file = mapping.get_src_file(src_file)
-        
-        if helpers.is_same_file(src_file, dest_file):
-            logging.info("Skipping existing file: %s", dest_file)
-        else:
-            helpers.copy_file_with_metadata(src_file, dest_file)
-            
-        processed.add(src_file)
-            
-        for link_src_file in inode_map.get(stat.st_ino, set()):
-            if link_src_file in processed:
-                continue
-            
-            link_dest_file = mapping.get_src_file(link_src_file)
-            if helpers.is_same_file(link_src_file, link_dest_file):
-                logging.info("Skipping existing file: %s", link_dest_file)
-            else:
-                if os.path.exists(link_dest_file):
-                    logging.warning("Destination file: %s is not the same as: %s. Skipping...", link_dest_file, link_src_file)
-                else:
-                    helpers.link_file(dest_file, link_src_file, link_dest_file)
-                    
-            processed.add(link_src_file)
+            if inode in inodes_map:
+                inodes_map[inode].add(src_file)
                 
-        total += stat.st_size
+    total = move_files(mapping, files_to_move, inodes_map, mapping.get_src_file, mapping.can_move_to_source)
     
     return total
                 
