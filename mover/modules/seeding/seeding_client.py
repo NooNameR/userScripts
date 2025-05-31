@@ -3,11 +3,15 @@ from typing import Set, Tuple
 
 class SeedingClient(ABC):
     @abstractmethod
-    def pause(self, path: str):
+    def scan(self, root: str) -> None:
         pass
     
     @abstractmethod
-    def resume(self):
+    def pause(self, path: str) -> None:
+        pass
+    
+    @abstractmethod
+    def resume(self) -> None:
         pass
     
     @abstractmethod

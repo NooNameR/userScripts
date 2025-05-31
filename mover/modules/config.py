@@ -53,30 +53,38 @@ class MovingMapping:
         else:
             return NoopRewriter(source, destination)
         
-    def needs_moving(self) -> bool:
+    def needs_moving(self) -> int:
         total, used, _ = shutil.disk_usage(self.source)
         percent_used = round((used / total) * 100, 4)
+        threshold_bytes = used - int(total * (self.threshold / 100))
         
-        if percent_used >= self.threshold:
+        if threshold_bytes > 0:
+            for client in self.clients:
+                client.scan(self.source)
+            
             logging.debug("Space usage: %.4g%% is above moving threshold: %.4g%%. Starting %s...", percent_used, self.threshold, self.source)
-            return True
+            return threshold_bytes
         
         logging.info("Space usage: %.4g%% is below moving threshold: %.4g%%. Skipping %s...", percent_used, self.threshold, self.source)
-        return False
-    
-    def can_move_to_source(self) -> bool:
+        return 0
+
+    def can_move_to_source(self) -> int:
         if not self.cache_threshold:
-            return False
+            return 0
         
         total, used, _ = shutil.disk_usage(self.source)
         percent_used = round((used / total) * 100, 4)
+        threshold_bytes = int(total * (self.cache_threshold / 100)) - used
         
-        if percent_used <= self.cache_threshold:
-            logging.debug("Space usage: %.4g%% is belowe cache threshold: %.4g%%. Starting %s...", percent_used, self.cache_threshold, self.source)
-            return True
+        if threshold_bytes > 0:
+            for client in self.clients:
+                client.scan(self.destination)
+                
+            logging.debug("Space usage: %.4g%% is below cache threshold: %.4g%%. Starting %s...", percent_used, self.cache_threshold, self.source)
+            return threshold_bytes
         
         logging.info("Space usage: %.4g%% is above cache threshold: %.4g%%. Skipping %s...", percent_used, self.cache_threshold, self.source)
-        return False
+        return 0
     
     def eligible_for_source(self) -> List[str]:
         return [i for plex in self.plex for i in plex.continue_watching()]

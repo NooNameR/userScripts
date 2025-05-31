@@ -44,7 +44,7 @@ class Plex(MediaPlayer):
                     for part in media.parts:
                         path = self.rewriter.on_source(part.file)
                         if os.path.exists(path):
-                            logging.debug("Non-Watched %s: %s (%s)", item.type, item.title, path)
+                            logging.debug("[%s] Non-Watched %s: %s (%s)", self, item.type, item.title, path)
                             result.add(path)
             
             def process_server(server):
@@ -69,7 +69,7 @@ class Plex(MediaPlayer):
             for future in as_completed(futures):
                 not_watched.update(future.result())
             
-        logging.info("Found %d not-watched files in the plex library", len(not_watched))
+        logging.info("[%s] Found %d not-watched files in the plex library", self, len(not_watched))
                                     
         return not_watched
     
@@ -125,7 +125,7 @@ class Plex(MediaPlayer):
                         continue
                     result.append(detination_path)
                 
-        logging.info("Detected %d watching files not currently available on source drives in Plex library", len(result))
+        logging.info("[%s] Detected %d watching files not currently available on source drives in Plex library", self, len(result))
         
         return result
     
@@ -148,11 +148,11 @@ class Plex(MediaPlayer):
                 
             for item in sorted(server.continueWatching(), key=lambda i: i.lastViewedAt or 0, reverse=True):
                 if self.libraries and item.librarySectionTitle not in self.libraries:
-                    logging.debug("Item: %s is in %s library skipping...", item.title, item.librarySectionTitle)
+                    logging.debug("[%s] Item: %s is in %s library skipping...", self, item.title, item.librarySectionTitle)
                     continue
                 
                 if not item.lastViewedAt or item.lastViewedAt < cutoff:
-                    logging.debug("Item: %s last watched at %s (cutoff: %s) — skipping...", item.title, item.lastViewedAt or "?", cutoff)
+                    logging.debug("[%s] Item: %s last watched at %s (cutoff: %s) — skipping...", self, item.title, item.lastViewedAt or "?", cutoff)
                     continue
                 
                 if item.type == 'movie':
@@ -186,7 +186,7 @@ class Plex(MediaPlayer):
             
             result.append(temp)
     
-        logging.info("Detected %d watching files in Plex library", len(result))
+        logging.info("[%s] Detected %d watching files in Plex library", self, len(result))
                     
         return result
     

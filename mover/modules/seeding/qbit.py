@@ -17,6 +17,8 @@ class Qbit(SeedingClient):
         self.user: str = user
         self.password: str = password
         self.paused_torrents = []
+        self.seen: Set[str] = set()
+        self.cache = defaultdict(list)
         
     @cached_property
     def __client(self):
@@ -39,54 +41,50 @@ class Qbit(SeedingClient):
     
     @cached_property
     def __torrents(self):
-        torrents = self.__client.torrents.info(status_filter="completed", sort="completion_on", reverse=True)
+        return self.__client.torrents.info(status_filter="completed", sort="completion_on", reverse=True)
         
-        def __populate(path, torrent):
+    def scan(self, root: str) -> None:
+        if root in self.seen:
+            return
+        
+        logging.info("[%s] Scanning torrents on %s...", self, root)
+        
+        total = 0
+        for torrent in self.__torrents:
+            path = self.rewriter.rewrite(root, torrent.content_path)
             if not os.path.exists(path):
-                return 0
+                continue
             if os.path.isdir(path):
-                for root, _, files in os.walk(path):
+                for root_, _, files in os.walk(path):
                     for file in files:
-                        full_path = os.path.join(root, file)
-                        result[get_stat(full_path).st_ino].append(torrent)
+                        full_path = os.path.join(root_, file)
+                        self.cache[get_stat(full_path).st_ino].append(torrent)
             else:
-                result[get_stat(path).st_ino].append(torrent)
+                self.cache[get_stat(path).st_ino].append(torrent)
                 
-            return 1
+            total += 1
         
-        result = defaultdict(list)
-        total = 0
-        for torrent in torrents:
-            total += __populate(self.rewriter.on_source(torrent.content_path), torrent)
-        
-        logging.info(f"Found %d torrents on source", total)
-            
-        total = 0
-        for torrent in torrents:
-            total += __populate(self.rewriter.on_destination(torrent.content_path), torrent)
-        
-        logging.info(f"Found %d torrents on destination", total)     
-
-        return result
+        logging.info("[%s] Found %d torrents on %s", self, total, root)
+        self.seen.add(root)
     
     def get_sort_key(self, path: str) -> Set[Tuple[int, int]]:
         inode = get_stat(path).st_ino
-        return {(self.now - torrent.completion_on, torrent.num_seeds) for torrent in self.__torrents[inode]}
+        return {(self.now - torrent.completion_on, torrent.num_seeds) for torrent in self.cache[inode]}
         
     def pause(self, path: str):
         inode = get_stat(path).st_ino
-        for torrent in self.__torrents[inode]:
+        for torrent in self.cache[inode]:
             if torrent in self.paused_torrents:
                 continue
             
-            logging.info("[%s] Pausing torrent: %s [%d] -> %s", torrent.hash, torrent.name, torrent.added_on, torrent.content_path)
+            logging.info("[%s] [%s] Pausing torrent: %s [%d] -> %s", self, torrent.hash, torrent.name, torrent.added_on, torrent.content_path)
             execute(torrent.pause)
             self.paused_torrents.append(torrent)
         
     def resume(self):
         while self.paused_torrents:
             torrent = self.paused_torrents.pop()
-            logging.info("[%s] Resuming torrent: %s [%d] -> %s", torrent.hash, torrent.name, torrent.added_on, torrent.content_path)
+            logging.info("[%s] [%s] Resuming torrent: %s [%d] -> %s", self, torrent.hash, torrent.name, torrent.added_on, torrent.content_path)
             execute(torrent.resume)
 
     def __str__(self):

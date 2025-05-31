@@ -10,7 +10,7 @@ from typing import Callable, Dict, Set, Iterable
 from collections import defaultdict
 from modules.config import Config, MovingMapping
 
-def move_files(mapping: MovingMapping, files: Iterable[str], inodes: Dict[int, Set[str]], dest_func: Callable[[str], str], can_move: Callable[[], bool]) -> int:
+def move_files(mapping: MovingMapping, files: Iterable[str], inodes: Dict[int, Set[str]], dest_func: Callable[[str], str], remaining: int) -> int:
     total: int = 0
     processed: Set[str] = set()
     
@@ -24,13 +24,15 @@ def move_files(mapping: MovingMapping, files: Iterable[str], inodes: Dict[int, S
             continue
         
         # Check if the file is within the age range
-        if not can_move():
-            logging.debug("Stopping mover...")
+        if remaining <= 0:
+            logging.debug("Already reached required amount to move. Stopping mover...")
             break
         
         if mapping.is_active(src_file):
             logging.info("Skipping file, currently is being actively used: %s", src_file)
             continue
+        
+        logging.debug("Processing file: %s | Remaining bytes to move: %s", src_file, helpers.format_bytes_to_gib(remaining))
         
         stat = helpers.get_stat(src_file)
     
@@ -67,16 +69,18 @@ def move_files(mapping: MovingMapping, files: Iterable[str], inodes: Dict[int, S
                 
         helpers.delete_file(src_file)
         total += stat.st_size
+        remaining -= stat.st_size
     
     return total
 
-def move_to_destination(mapping: MovingMapping) -> int:    
-    if not mapping.needs_moving():
+def move_to_destination(mapping: MovingMapping) -> int:
+    needs_moving = mapping.needs_moving()
+    if not needs_moving:
         logging.debug("Stopping mover, source: %s is below the threshold", mapping.source)
         return 0
     
-    inodes_map = defaultdict(set)
-    files_to_move = set()
+    inodes_map: Dict[int, Set[str]] = defaultdict(set)
+    files_to_move: Set[str] = set()
     logging.info("Scanning %s...", mapping.source)
     
     for root, dirs, files in os.walk(mapping.source):
@@ -88,28 +92,38 @@ def move_to_destination(mapping: MovingMapping) -> int:
             # Get the inode of the source file
             inode = helpers.get_stat(src_file).st_ino
 
-            if inode in inodes_map:
-                inodes_map[inode].add(src_file)
-            else:
+            if inode not in inodes_map:
                 files_to_move.add(src_file)
+                
+            inodes_map[inode].add(src_file)
     
-    total = move_files(mapping, sorted(files_to_move, key=mapping.get_sort_key), inodes_map, mapping.get_dest_file, mapping.needs_moving)
+    logging.info(
+        "Starting mover (%s -> %s) for %d potential files with %d hardlinks to move. Moving approximately %s...",
+        mapping.source, 
+        mapping.destination, 
+        len(files_to_move), 
+        sum(len(v) for v in inodes_map.values()), 
+        helpers.format_bytes_to_gib(needs_moving)
+    )
+    
+    total = move_files(mapping, sorted(files_to_move, key=mapping.get_sort_key), inodes_map, mapping.get_dest_file, needs_moving)
     
     helpers.delete_empty_dirs(mapping.source, mapping.is_ignored)
     
     return total
 
 def move_to_source(mapping: MovingMapping) -> int:
-    if not mapping.can_move_to_source():
+    can_move = mapping.can_move_to_source()
+    if not can_move:
         return 0
     
-    files_to_move = mapping.eligible_for_source()
+    files_to_move: Set[str] = mapping.eligible_for_source()
     if not files_to_move:
         return 0
     
     logging.info("Scanning %s...", mapping.destination)
     
-    inodes_map = {helpers.get_stat(f).st_ino: set() for f in files_to_move}
+    inodes_map: Dict[int, Set[str]] = {helpers.get_stat(f).st_ino: set() for f in files_to_move}
     for root, dirs, files in os.walk(mapping.destination):
         dirs.sort()
 
@@ -121,7 +135,17 @@ def move_to_source(mapping: MovingMapping) -> int:
             if inode in inodes_map:
                 inodes_map[inode].add(src_file)
                 
-    total = move_files(mapping, files_to_move, inodes_map, mapping.get_src_file, mapping.can_move_to_source)
+    logging.info(
+        "Starting mover (%s -> %s) for %d potential files with %d hardlinks to move. Moving max up to %s...",
+        mapping.destination, 
+        mapping.source, 
+        len(files_to_move), 
+        sum(len(v) for v in inodes_map.values()),
+        helpers.format_bytes_to_gib(can_move)
+    )
+    total = move_files(mapping, files_to_move, inodes_map, mapping.get_src_file, can_move)
+    
+    helpers.delete_empty_dirs(mapping.destination, mapping.is_ignored)
     
     return total
                 
