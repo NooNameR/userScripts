@@ -88,8 +88,10 @@ def move_to_destination(mapping: MovingMapping) -> int:
             # Get the inode of the source file
             inode = helpers.get_stat(src_file).st_ino
 
-            files_to_move.add(src_file)
-            inodes_map[inode].add(src_file)
+            if inode in inodes_map:
+                inodes_map[inode].add(src_file)
+            else:
+                files_to_move.add(src_file)
     
     total = move_files(mapping, sorted(files_to_move, key=mapping.get_sort_key), inodes_map, mapping.get_dest_file, mapping.needs_moving)
     
