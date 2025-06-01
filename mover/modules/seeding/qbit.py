@@ -1,6 +1,8 @@
 import os
 import sys
+import asyncio
 import logging
+import threading
 from functools import cached_property
 from ..rewriter import Rewriter
 from .seeding_client import SeedingClient
@@ -10,6 +12,8 @@ from ..helpers import execute, get_stat
 from datetime import datetime
 
 class Qbit(SeedingClient):
+    _lock = threading.Lock()
+    
     def __init__(self, now: datetime, rewriter: Rewriter, host: str, user: str, password: str):
         self.now = now.timestamp()
         self.rewriter: Rewriter = rewriter
@@ -19,6 +23,9 @@ class Qbit(SeedingClient):
         self.paused_torrents = []
         self.seen: Set[str] = set()
         self.cache = defaultdict(list)
+        self.tasks = []
+        self._tasks_lock = threading.Lock()
+        self._lock = threading.Lock()
         
     @cached_property
     def __client(self):
@@ -41,7 +48,19 @@ class Qbit(SeedingClient):
     
     @cached_property
     def __torrents(self):
-        return self.__client.torrents.info(status_filter="completed", sort="completion_on", reverse=True)
+        with self._lock:
+            return self.__client.torrents.info(status_filter="completed", sort="completion_on", reverse=True)
+    
+    async def __get_torrents(self, inode: int):
+        tasks = []
+        with self._tasks_lock:
+            tasks = self.tasks
+            self.tasks.clear()
+                
+        if tasks:
+            await asyncio.gather(*tasks)
+            
+        return self.cache[inode]
         
     def scan(self, root: str) -> None:
         if root in self.seen:
@@ -49,31 +68,37 @@ class Qbit(SeedingClient):
         
         logging.info("[%s] Scanning torrents on %s...", self, root)
         
-        total = 0
-        for torrent in self.__torrents:
-            path = self.rewriter.rewrite(root, torrent.content_path)
-            if not os.path.exists(path):
-                continue
-            if os.path.isdir(path):
-                for root_, _, files in os.walk(path):
-                    for file in files:
-                        full_path = os.path.join(root_, file)
-                        self.cache[get_stat(full_path).st_ino].append(torrent)
-            else:
-                self.cache[get_stat(path).st_ino].append(torrent)
-                
-            total += 1
+        def submit():
+            total = 0
+            for torrent in self.__torrents:
+                path = self.rewriter.rewrite(root, torrent.content_path)
+                if not os.path.exists(path):
+                    continue
+                if os.path.isdir(path):
+                    for root_, _, files in os.walk(path):
+                        for file in files:
+                            full_path = os.path.join(root_, file)
+                            self.cache[get_stat(full_path).st_ino].append(torrent)
+                else:
+                    self.cache[get_stat(path).st_ino].append(torrent)
+                    
+                total += 1
         
-        logging.info("[%s] Found %d torrents on %s", self, total, root)
+            logging.info("[%s] Found %d torrents on %s", self, total, root)
+        
         self.seen.add(root)
-    
-    def get_sort_key(self, path: str) -> Set[Tuple[int, int]]:
+        with self._tasks_lock:
+            self.tasks.append(asyncio.create_task(asyncio.to_thread(submit)))
+
+    async def get_sort_key(self, path: str) -> Set[Tuple[int, int]]:
         inode = get_stat(path).st_ino
-        return {(self.now - torrent.completion_on, torrent.num_seeds) for torrent in self.cache[inode]}
+        torrents = await self.__get_torrents(inode)
+        return {(self.now - torrent.completion_on, torrent.num_seeds) for torrent in torrents}
         
-    def pause(self, path: str):
+    async def pause(self, path: str):
         inode = get_stat(path).st_ino
-        for torrent in self.cache[inode]:
+        torrents = await self.__get_torrents(inode)
+        for torrent in torrents:
             if torrent in self.paused_torrents:
                 continue
             
@@ -81,7 +106,7 @@ class Qbit(SeedingClient):
             execute(torrent.pause)
             self.paused_torrents.append(torrent)
         
-    def resume(self):
+    async def resume(self):
         while self.paused_torrents:
             torrent = self.paused_torrents.pop()
             logging.info("[%s] [%s] Resuming torrent: %s [%d] -> %s", self, torrent.hash, torrent.name, torrent.added_on, torrent.content_path)
