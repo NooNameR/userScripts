@@ -108,16 +108,10 @@ class MovingMapping:
     def resume(self) -> asyncio.Future:
         return asyncio.gather(*(qbit.resume() for qbit in self.clients))
             
-    async def get_sort_key(self, path: str) -> Tuple[int, int, int, int, int, int, float]:
+    async def get_sort_key(self, path: str) -> Tuple[int, int, int, int, int, float]:
         # ignored path, no point checking
         if self.is_ignored(path):
-            return (1, 0, 0, 0, 0, 0, 0)
-        
-        def within_range(age: float):
-            return self.min_age <= age <= self.max_age
-        
-        ctime = get_ctime(path)
-        age_priority = 0 if within_range(self.now.timestamp() - ctime) else 1
+            return (1, 0, 0, 0, 0, 0)
         
         qbit_results: List[Tuple[int, int]]
         plex_results: List[int]
@@ -133,15 +127,19 @@ class MovingMapping:
         size = get_stat(path).st_size
         
         return (
-            age_priority,       # 1. age_priority (0 if within age range, else 1)
+            # age_priority,       # 1. age_priority (0 if within age range, else 1)
             plex_key,           # 2. plex un-watched -> 1, watched 0
             has_torrent,        # 3. has_torrent (0 if has torrents, else 1)
             -completion_age,    # 4. -completion_age (negative to prioritize older completion age)
             -num_seeders,       # 5. -num_seeders (negative to prioritize more seeders)
             len(qbit_results),  # 6. num seeding torrents
             -size,              # 7. bigger file goes first
-            ctime               # 8. ctime (file creation time as tiebreaker)
+            get_ctime(path)     # 8. ctime (file creation time as tiebreaker)
         )
+        
+    def within_age_range(self, path: float):
+        age = self.now.timestamp() - get_ctime(path)
+        return self.min_age <= age <= self.max_age
     
     async def is_active(self, file: str) -> bool:
         tasks = [asyncio.create_task(plex.is_active(file)) for plex in self.plex]

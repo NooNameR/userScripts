@@ -7,7 +7,7 @@ import asyncio
 import modules.helpers as helpers
 from logging.handlers import RotatingFileHandler
 from datetime import datetime
-from typing import Callable, Dict, Set, Iterable
+from typing import Callable, Dict, Set, Iterable, List
 from collections import defaultdict
 from modules.config import Config, MovingMapping
 from asyncio import PriorityQueue
@@ -102,7 +102,7 @@ async def move_to_destination(mapping: MovingMapping) -> int:
             # Get the inode of the source file
             inode = helpers.get_stat(src_file).st_ino
 
-            if inode not in inodes_map:
+            if inode not in inodes_map and mapping.within_age_range(src_file):
                 tasks.append(enqueue_with_key(src_file))
                 
             inodes_map[inode].add(src_file)
@@ -129,7 +129,7 @@ async def move_to_source(mapping: MovingMapping) -> int:
     if not can_move:
         return 0
     
-    files_to_move: Set[str] = await mapping.eligible_for_source()
+    files_to_move: List[str] = await mapping.eligible_for_source()
     if not files_to_move:
         return 0
     
