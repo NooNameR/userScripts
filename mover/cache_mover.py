@@ -3,14 +3,16 @@ import fcntl
 import shutil
 import sys
 import logging
-from logging.handlers import RotatingFileHandler
+import asyncio
 import modules.helpers as helpers
+from logging.handlers import RotatingFileHandler
 from datetime import datetime
 from typing import Callable, Dict, Set, Iterable
 from collections import defaultdict
 from modules.config import Config, MovingMapping
+from asyncio import PriorityQueue
 
-def move_files(mapping: MovingMapping, files: Iterable[str], inodes: Dict[int, Set[str]], dest_func: Callable[[str], str], remaining: int) -> int:
+async def move_files(mapping: MovingMapping, files: Iterable[str], inodes: Dict[int, Set[str]], dest_func: Callable[[str], str], remaining: int) -> int:
     total: int = 0
     processed: Set[str] = set()
     
@@ -28,7 +30,7 @@ def move_files(mapping: MovingMapping, files: Iterable[str], inodes: Dict[int, S
             logging.debug("Already reached required amount to move. Stopping mover...")
             break
         
-        if mapping.is_active(src_file):
+        if await mapping.is_active(src_file):
             logging.info("Skipping file, currently is being actively used: %s", src_file)
             continue
         
@@ -36,7 +38,7 @@ def move_files(mapping: MovingMapping, files: Iterable[str], inodes: Dict[int, S
         
         stat = helpers.get_stat(src_file)
     
-        mapping.pause(src_file)
+        await mapping.pause(src_file)
         
         dest_file = dest_func(src_file)
         # Skip if the file already exists in the destination with the same size
@@ -52,7 +54,7 @@ def move_files(mapping: MovingMapping, files: Iterable[str], inodes: Dict[int, S
                 continue
             
             link_dest_file = dest_func(link_src_file)
-            mapping.pause(link_src_file)
+            await mapping.pause(link_src_file)
             if helpers.is_same_file(link_src_file, link_dest_file):
                 logging.info("Skipping existing file: %s", link_dest_file)
             else:
@@ -73,15 +75,23 @@ def move_files(mapping: MovingMapping, files: Iterable[str], inodes: Dict[int, S
     
     return total
 
-def move_to_destination(mapping: MovingMapping) -> int:
+async def move_to_destination(mapping: MovingMapping) -> int:
     needs_moving = mapping.needs_moving()
     if not needs_moving:
         logging.debug("Stopping mover, source: %s is below the threshold", mapping.source)
         return 0
     
+    pq = PriorityQueue()
+    tasks = []
     inodes_map: Dict[int, Set[str]] = defaultdict(set)
-    files_to_move: Set[str] = set()
     logging.info("Scanning %s...", mapping.source)
+    
+    sem = asyncio.Semaphore(os.cpu_count() or 4)
+    
+    async def enqueue_with_key(src_file):
+        async with sem:
+            key = await mapping.get_sort_key(src_file)
+            await pq.put((key, src_file))
     
     for root, dirs, files in os.walk(mapping.source):
         dirs.sort()
@@ -93,31 +103,33 @@ def move_to_destination(mapping: MovingMapping) -> int:
             inode = helpers.get_stat(src_file).st_ino
 
             if inode not in inodes_map:
-                files_to_move.add(src_file)
+                tasks.append(enqueue_with_key(src_file))
                 
             inodes_map[inode].add(src_file)
+        
+    await asyncio.gather(*tasks)
     
     logging.info(
         "Starting mover (%s -> %s) for %d potential files with %d hardlinks to move. Moving approximately %s...",
         mapping.source, 
-        mapping.destination, 
-        len(files_to_move), 
+        mapping.destination,
+        pq.qsize(),
         sum(len(v) for v in inodes_map.values()), 
         helpers.format_bytes_to_gib(needs_moving)
     )
     
-    total = move_files(mapping, sorted(files_to_move, key=mapping.get_sort_key), inodes_map, mapping.get_dest_file, needs_moving)
+    total = await move_files(mapping, [(await pq.get())[1] for _ in range(pq.qsize())], inodes_map, mapping.get_dest_file, needs_moving)
     
     helpers.delete_empty_dirs(mapping.source, mapping.is_ignored)
     
     return total
 
-def move_to_source(mapping: MovingMapping) -> int:
+async def move_to_source(mapping: MovingMapping) -> int:
     can_move = mapping.can_move_to_source()
     if not can_move:
         return 0
     
-    files_to_move: Set[str] = mapping.eligible_for_source()
+    files_to_move: Set[str] = await mapping.eligible_for_source()
     if not files_to_move:
         return 0
     
@@ -143,11 +155,29 @@ def move_to_source(mapping: MovingMapping) -> int:
         sum(len(v) for v in inodes_map.values()),
         helpers.format_bytes_to_gib(can_move)
     )
-    total = move_files(mapping, files_to_move, inodes_map, mapping.get_src_file, can_move)
+    total = await move_files(mapping, files_to_move, inodes_map, mapping.get_src_file, can_move)
     
     helpers.delete_empty_dirs(mapping.destination, mapping.is_ignored)
     
     return total
+
+async def main(args, config: Config):
+    for mapping in config.mappings:
+        try:            
+            _, _, startingfree = shutil.disk_usage(mapping.source)
+            emptiedspace = await move_to_destination(mapping)
+            moved_to_source = await move_to_source(mapping)
+            _, _, ending_free = shutil.disk_usage(mapping.source)
+            logging.info("Migration and hardlink recreation completed successfully from '%s' to '%s'", mapping.source, mapping.destination)
+            logging.info("Starting free space: %s -- Ending free space: %s", helpers.format_bytes_to_gib(startingfree), helpers.format_bytes_to_gib(ending_free))
+            logging.info("FREED UP %s TOTAL SPACE", helpers.format_bytes_to_gib(emptiedspace))
+            logging.info("MOVED BACK TO SOURCE %s", helpers.format_bytes_to_gib(moved_to_source))
+        except IndexError as e:
+            logging.error("Error: %s", e, exc_info=True)
+        except Exception as e:
+            logging.error("Error: %s", e, exc_info=True)
+        finally:
+            await mapping.resume()
                 
 if __name__ == "__main__":
     import argparse
@@ -182,31 +212,16 @@ if __name__ == "__main__":
     
     config = Config(now, args.config)
     logging.info(config)
-
+    
     lock_file = open(args.lock_file, 'w')
     try:
         fcntl.flock(lock_file, fcntl.LOCK_EX | fcntl.LOCK_NB)
     except BlockingIOError:
         logging.error("Another instance is already running.")
         sys.exit()
-    
+
     try:
-        for mapping in config.mappings:
-            try:            
-                _, _, startingfree = shutil.disk_usage(mapping.source)
-                emptiedspace = move_to_destination(mapping)
-                moved_to_source = move_to_source(mapping)
-                _, _, ending_free = shutil.disk_usage(mapping.source)
-                logging.info("Migration and hardlink recreation completed successfully from '%s' to '%s'", mapping.source, mapping.destination)
-                logging.info("Starting free space: %s -- Ending free space: %s", helpers.format_bytes_to_gib(startingfree), helpers.format_bytes_to_gib(ending_free))
-                logging.info("FREED UP %s TOTAL SPACE", helpers.format_bytes_to_gib(emptiedspace))
-                logging.info("MOVED BACK TO SOURCE %s", helpers.format_bytes_to_gib(moved_to_source))
-            except IndexError as e:
-                logging.error("Error: %s", e, exc_info=True)
-            except Exception as e:
-                logging.error("Error: %s", e, exc_info=True)
-            finally:
-                mapping.resume()
+        asyncio.run(main(args, config))
     finally:
         lock_file.close()
         os.remove(lock_file.name)

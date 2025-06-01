@@ -3,6 +3,7 @@ import fnmatch
 import os
 import shutil
 import logging
+import asyncio
 from .media.plex import Plex
 from .media.media_player import MediaPlayer
 from .seeding.qbit import Qbit
@@ -86,8 +87,9 @@ class MovingMapping:
         logging.info("Space usage: %.4g%% is above cache threshold: %.4g%%. Skipping %s...", percent_used, self.cache_threshold, self.source)
         return 0
     
-    def eligible_for_source(self) -> List[str]:
-        return [i for plex in self.plex for i in plex.continue_watching()]
+    async def eligible_for_source(self) -> List[str]:
+        results = await asyncio.gather(*(plex.continue_watching() for plex in self.plex))
+        return [i for plex in results for i in plex]
     
     def get_src_file(self, path: str) -> str:
         rel_path = os.path.relpath(path, self.destination)
@@ -97,42 +99,32 @@ class MovingMapping:
         rel_path = os.path.relpath(src_path, self.source)
         return os.path.join(self.destination, rel_path)
         
-    def pause(self, path: str) -> None:
-        for qbit in self.clients:
-            qbit.pause(path)
+    def pause(self, path: str) -> asyncio.Future:
+        return asyncio.gather(*(qbit.pause(path) for qbit in self.clients))
             
-    def resume(self) -> None:
-        for qbit in self.clients:
-            qbit.resume()
+    def resume(self) -> asyncio.Future:
+        return asyncio.gather(*(qbit.resume() for qbit in self.clients))
             
-    def get_sort_key(self, path: str) -> Tuple[int, int, int, int, int, int, float]:
+    async def get_sort_key(self, path: str) -> Tuple[int, int, int, int, int, int, float]:
         # ignored path, no point checking
         if self.is_ignored(path):
-            return (0, 0, 0, 0, 0, 0)
+            return (1, 0, 0, 0, 0, 0, 0)
         
         def within_range(age: float):
             return self.min_age <= age <= self.max_age
         
         ctime = get_ctime(path)
         age_priority = 0 if within_range(self.now.timestamp() - ctime) else 1
-        qbit_results: Set[Tuple[int, int]] = set()
-        plex_results: Set[int] = set()
+        
+        qbit_results: List[Tuple[int, int]]
+        plex_results: List[int]
+    
+        qbit_results, plex_results = await asyncio.gather(
+            asyncio.gather(*(qbit.get_sort_key(path) for qbit in self.clients)),
+            asyncio.gather(*(plex.get_sort_key(path) for plex in self.plex))
+        )
 
-        with ThreadPoolExecutor(max_workers=3) as executor:
-            # Submit Qbit futures
-            qbit_futures = [executor.submit(qbit.get_sort_key, path) for qbit in self.clients]
-            plex_futures = [executor.submit(plex.get_sort_key, path) for plex in self.plex]
-            
-            for future in as_completed(qbit_futures):
-                result = future.result()
-                if result:
-                    qbit_results.add((min(a for a, _ in result), min(n for _, n in result)))
-
-            # Submit Plex futures
-            for future in as_completed(plex_futures):
-                plex_results.add(future.result())
-
-        completion_age, num_seeders = min(qbit_results, default=(0, 0))
+        completion_age, num_seeders = min({(min(a for a, _ in res), min(n for _, n in res)) for res in qbit_results if res}, default=(0, 0))
         plex_key = max(plex_results, default = 0)
         has_torrent = 1 if qbit_results else 0
         size = get_stat(path).st_size
@@ -148,11 +140,21 @@ class MovingMapping:
             ctime               # 8. ctime (file creation time as tiebreaker)
         )
     
-    def is_active(self, file: str) -> bool:
-        for plex in self.plex:
-            if plex.is_active(file):
-                return True
-        return False
+    async def is_active(self, file: str) -> bool:
+        tasks = [asyncio.create_task(plex.is_active(file)) for plex in self.plex]
+        
+        result = False
+        for coro in asyncio.as_completed(tasks):
+            if await coro:
+                for t in tasks:
+                    if not t.done():
+                        t.cancel()
+                result = True
+                break
+                
+        await asyncio.gather(*tasks, return_exceptions=True)
+        
+        return result
         
     def is_ignored(self, path: str) -> bool:
         if not self.ignores:

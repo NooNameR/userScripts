@@ -16,9 +16,9 @@ class MediaPlayer(ABC):
         pass
     
     @abstractmethod
-    def get_sort_key(self, path: str) -> int:
+    async def get_sort_key(self, path: str) -> int:
         pass
     
     @abstractmethod
-    def continue_watching(self) -> List[str]:
+    async def continue_watching(self) -> List[str]:
         pass
