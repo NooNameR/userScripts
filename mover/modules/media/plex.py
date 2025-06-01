@@ -222,10 +222,11 @@ class Plex(MediaPlayer):
         return asyncio.create_task(process())
     
     def __str__(self):
-        return self.url
+        return f"{self.type.name}@{self.url}".lower()
     
     def __repr__(self):
         return self.__str__()
     
+    @property
     def type(self):
         return MediaPlayerType.PLEX

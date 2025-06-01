@@ -1,113 +1,280 @@
 import os
-import requests
+import httpx
+import asyncio
 import logging
+from typing import Set, List
+from datetime import timedelta, datetime, timezone
 from .media_player import MediaPlayer, MediaPlayerType
 from ..rewriter import Rewriter
-from typing import Set, List
-from collections import OrderedDict
-from datetime import timedelta, datetime
 from functools import cached_property
 
 class Jellyfin(MediaPlayer):
     def __init__(self, now: datetime, rewriter: Rewriter, url: str, api_key: str, libraries: List[str] = [], users: List[str] = []):
-        self.now: datetime = now
-        self.rewriter: Rewriter = rewriter
-        self.url: str = url.rstrip('/')
-        self.api_key: str = api_key
-        self.libraries: Set[str] = set(libraries)
-        self.users: Set[str] = set(users)
+        self.now = now.astimezone(timezone.utc)
+        self.rewriter = rewriter
+        self.url = url.rstrip('/')
+        self.api_key = api_key
+        self.libraries = set(libraries)
+        self.users = set(users)
 
-    def _headers(self):
-        return {
-            "X-Emby-Token": self.api_key,
-            "Accept": "application/json"
-        }
+    @cached_property 
+    def _client(self):
+        return httpx.AsyncClient(
+            base_url=self.url, 
+            headers={
+                "Authorization": f'MediaBrowser Token="{self.api_key}"',
+                "Accept": "application/json",
+            },
+            timeout=httpx.Timeout(
+                connect=10.0,
+                read=120.0,
+                write=10.0,
+                pool=30.0
+            ),
+            limits=httpx.Limits(max_keepalive_connections=20, max_connections=100),
+        )
 
-    def _get(self, endpoint, params=None):
-        response = requests.get(f"{self.url}/emby{endpoint}", headers=self._headers(), params=params)
+    async def _get(self, endpoint: str, params=None):
+        response = await self._client.get(endpoint, params=params)
         response.raise_for_status()
         return response.json()
 
+    @cached_property
+    def _get_users(self):
+        async def process():
+            users = await self._get("/Users")
+            return set([u["Id"] for u in users if not self.users or u["Name"] in self.users])
+        
+        return asyncio.create_task(process())
+
+    @cached_property
     def _get_library_ids(self):
-        libraries = self._get("/Users/Me/Views").get("Items", [])
-        return [lib["Id"] for lib in libraries if not self.libraries or lib["Name"] in self.libraries]
+        async def process():
+            user_ids = await self._get_users
+            
+            async def get_views(user_id):
+                views = await self._get(f"/Users/{user_id}/Views")
+                return user_id, {
+                    v["Id"]
+                    for v in views.get("Items", [])
+                    if not self.libraries or v["Name"] in self.libraries
+                }
 
-    def _get_items(self, filters):
-        items = []
-        for library_id in self._get_library_ids():
-            params = filters.copy()
-            params["ParentId"] = library_id
-            result = self._get("/Items", params)
-            items.extend(result.get("Items", []))
-        return items
-
+            # Run all in parallel, each returning (user_id, set_of_ids)
+            return dict(await asyncio.gather(*(get_views(uid) for uid in user_ids)))
+    
+        return asyncio.create_task(process())
+        
     @cached_property
     def not_watched_media(self) -> Set[str]:
-        not_watched = set()
-        items = self._get_items({"Filters": "IsUnplayed"})
-        for item in items:
-            media_sources = item.get("MediaSources", [])
-            for media in media_sources:
-                file_path = media.get("Path")
-                if not file_path:
-                    continue
-                path = self.rewriter.on_source(file_path)
-                if os.path.exists(path):
-                    logging.debug("Unwatched %s: %s (%s)", item.get("Type"), item.get("Name"), path)
-                    not_watched.add(path)
+        async def get_for_user_id(user_id: str, allowed_ids: Set[str]) -> List[str]:
+            async def get_for_library(library_id: str) -> List[str]:
+                found: Set[str] = set()
+                params = {
+                    "Filters": "IsUnplayed",
+                    "IncludeItemTypes": ["Episode", "Movie", "Video"],
+                    "ParentId": library_id,
+                    "UserId": user_id,
+                    "IsMissing": False,
+                    "Fields": "MediaSources",
+                    "Recursive": True,
+                }
+                result = await self._get("/Items", params)
+                for item in result.get("Items", []):
+                    for media in item.get("MediaSources", []):
+                        path = media.get("Path")
+                        if path:
+                            local_path = self.rewriter.on_source(path)
+                            if os.path.exists(local_path):
+                                logging.debug("Unwatched %s: %s (%s)", item.get("Type"), item.get("Name"), local_path)
+                                found.add(local_path)
+                return found
 
-        logging.info("Found %d not-watched files in the Jellyfin library", len(not_watched))
-        return not_watched
+            results = await asyncio.gather(*(get_for_library(lib_id) for lib_id in allowed_ids))
+            return set([p for sub in results for p in sub])
 
-    def get_sort_key(self, path: str) -> int:
-        return 1 if path in self.not_watched_media else 0
+        async def process():
+            user_results = await asyncio.gather(
+                *(get_for_user_id(user, lib_ids) for user, lib_ids in (await self._get_library_ids).items())
+            )
+            not_watched = set(p for paths in user_results for p in paths)
+            logging.info("[%s] Found %d not-watched files in the Jellyfin library", self, len(not_watched))
+            return not_watched
 
-    def is_active(self, file: str) -> bool:
-        sessions = self._get("/Sessions")
+        return asyncio.create_task(process())
+
+    async def is_active(self, file: str) -> bool:
+        sessions = await self._get("/Sessions")
         for session in sessions:
-            now_playing = session.get("NowPlayingItem")
-            if now_playing:
-                media_sources = now_playing.get("MediaSources", [])
-                for media in media_sources:
-                    path = self.rewriter.on_source(media.get("Path", ""))
-                    if os.path.exists(path) and os.path.samefile(path, file):
-                        return True
+            for item in filter(None, [session.get("NowPlayingItem"), session.get("NowViewingItem")]):
+                for media in item.get("MediaSources", []):
+                    path = media.get("Path")
+                    if path:
+                        resolved = self.rewriter.on_source(path)
+                        if os.path.exists(resolved) and os.path.samefile(resolved, file):
+                            return True
         return False
+    
+    async def get_sort_key(self, path: str) -> int:
+        not_watched, continue_watching = await asyncio.gather(
+            self.not_watched_media,
+            self.__continue_watching_on_source
+        )
+        
+        return (1 if path in not_watched else 0) + (1 if path in continue_watching else 0)
+    
+    @cached_property
+    def continue_watching(self) -> asyncio.Task[List[str]]:
+        async def process():
+            result: List[str] = []
+            max_count: int = 25
+            on_source = await self.__continue_watching_on_source
+            
+            for bucket in await self.__continue_watching:
+                remaining = max_count
+                for item in bucket:
+                    if not remaining:
+                        break
+                    
+                    remaining -= 1
+                    
+                    for path in item:
+                        source_path = self.rewriter.on_source(path)
+                        if source_path in on_source:
+                            continue
+                        
+                        detination_path = self.rewriter.on_destination(path)
+                        if not os.path.exists(detination_path):
+                            continue
+                        result.append(detination_path)
+                    
+            logging.info("[%s] Detected %d watching files not currently available on source drives in Plex library", self, len(result))
+            
+            return result
+        
+        return asyncio.create_task(process())
+    
+    @cached_property
+    def __continue_watching_on_source(self) -> asyncio.Task[Set[str]]:
+        async def process():
+            return {
+                self.rewriter.on_source(path)
+                for bucket in await self.__continue_watching
+                for media in bucket
+                for path in media
+                if os.path.exists(self.rewriter.on_source(path))
+            }
+        
+        return asyncio.create_task(process())
 
     @cached_property
-    def continue_watching(self) -> List[str]:
-        result = OrderedDict()
+    def __continue_watching(self) -> asyncio.Task[List[List[Set[str]]]]:
         cutoff = self.now - timedelta(weeks=1)
-        items = self._get_items({"Filters": "IsResumable", "SortBy": "DatePlayed", "SortOrder": "Descending"})
+        pq = asyncio.PriorityQueue()
+        
+        def get_for_user_id(user_id: str, allowed_ids: Set[str]):
+            async def get_for_library(library_id):
+                def parse_played_at(item) -> datetime:
+                    raw_date = item.get("UserData", {}).get("LastPlayedDate", "")
+                    
+                    try:
+                        return datetime.fromisoformat(raw_date.replace("Z", "+00:00"))
+                    except ValueError:
+                         return datetime(1970, 1, 1, tzinfo=timezone.utc)
+                
+                nextup_items = (await self._get("/Shows/NextUp", {
+                    "userId": user_id,
+                    "parentId": library_id,
+                    "enableUserData": "true",
+                    "enableResumable": "true",
+                    "nextUpDateCutoff": cutoff.isoformat(),
+                    "disableFirstEpisode": "true",
+                    "fields": ["MediaSources"],
+                })).get("Items", [])
 
-        for item in items:
-            last_played = item.get("DatePlayed")
-            if not last_played:
-                continue
+                for item in nextup_items:
+                    temp = []
+                    series_id = item.get("SeriesId")
+                    if not series_id:
+                        continue
+                    
+                    lastPlayedAt = parse_played_at(item)
+                    season = item.get("SeasonNumber", 1)
+                    index = item.get("IndexNumber", 1) - 1
 
-            try:
-                last_played_dt = datetime.fromisoformat(last_played.replace("Z", "+00:00"))
-                if last_played_dt < cutoff:
-                    continue
-            except Exception:
-                continue
-
-            media_sources = item.get("MediaSources", [])
-            for media in media_sources:
-                path = self.rewriter.rewrite(media.get("Path", ""))
-                destination_path = self.rewriter.on_destination(media.get("Path", ""))
-                if not os.path.exists(path) and os.path.exists(destination_path):
-                    result[destination_path] = None
-
-        logging.info("Detected %d watching files not currently available on source drives in Jellyfin library", len(result))
-        return list(result.keys())
+                    episodes = (await self._get(f"/Shows/{series_id}/Episodes", {
+                        "userId": user_id,
+                        "enableUserData": "true",
+                        "season": season,
+                        "startIndex": index,
+                        "fields": "MediaSources",
+                        "Recursive": True,
+                        "sortBy": "SeasonNumber,IndexNumber",
+                        "sortOrder": "Ascending",
+                    })).get("Items", [])
+                    while episodes:
+                        for ep in episodes:
+                            if ep.get("UserData", {}).get("Played"):
+                                lastPlayedAt = max(parse_played_at(ep), lastPlayedAt)
+                                continue
+                            
+                            temp.append({media.get("Path") for media in ep.get("MediaSources", []) if "Path" in media})
+                        
+                        season += 1
+                        index = 0
+                        
+                        episodes = (await self._get(f"/Shows/{series_id}/Episodes", {
+                            "userId": user_id,
+                            "enableUserData": "true",
+                            "season": season,
+                            "startIndex": index,
+                            "fields": "MediaSources",
+                            "Recursive": True,
+                            "sortBy": "SeasonNumber,IndexNumber",
+                            "sortOrder": "Ascending",
+                        })).get("Items", [])
+                    
+                    if lastPlayedAt < cutoff:
+                        continue
+                    
+                    if temp:
+                        await pq.put((-lastPlayedAt.timestamp(), temp))
+                
+            return asyncio.gather(*(get_for_library(library_id) for library_id in allowed_ids))
+        
+        async def process():
+            await asyncio.gather(*(get_for_user_id(user, lib_ids) for user, lib_ids in (await self._get_library_ids).items()))
+            
+            result: List[List[Set[str]]] = []
+            processed: Set[str] = set()
+            while not pq.empty():
+                _, media_list = await pq.get()
+                temp: List[Set[str]] = []
+                for media in media_list:
+                    m: Set[str] = set()
+                    for path in media:
+                        if path in processed:
+                            continue
+                        processed.add(path)
+                        m.add(path)
+                    temp.append(m)
+                
+                result.append(temp)
+            
+            logging.info("[%s] Detected %d watching files in Jellyfin library", self, len(result))
+            return result
+        
+        return asyncio.create_task(process())
 
     @property
     def type(self):
         return MediaPlayerType.JELLYFIN
 
     def __str__(self):
-        return self.url
+        return f"{self.type.name}@{self.url}".lower()
 
     def __repr__(self):
-        return self.__str__()
+        return str(self)
+
+    async def close(self):
+        await self._client.aclose()
