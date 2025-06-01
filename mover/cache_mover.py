@@ -76,7 +76,7 @@ async def move_files(mapping: MovingMapping, files: Iterable[str], inodes: Dict[
     return total
 
 async def move_to_destination(mapping: MovingMapping) -> int:
-    needs_moving = mapping.needs_moving()
+    needs_moving = await mapping.needs_moving()
     if not needs_moving:
         logging.debug("Stopping mover, source: %s is below the threshold", mapping.source)
         return 0
@@ -125,7 +125,7 @@ async def move_to_destination(mapping: MovingMapping) -> int:
     return total
 
 async def move_to_source(mapping: MovingMapping) -> int:
-    can_move = mapping.can_move_to_source()
+    can_move = await mapping.can_move_to_source()
     if not can_move:
         return 0
     

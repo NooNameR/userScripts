@@ -12,7 +12,6 @@ from .helpers import get_ctime, get_stat
 from datetime import datetime, timedelta
 from typing import Dict, Tuple, Set, List
 from .rewriter import Rewriter, RealRewriter, NoopRewriter
-from concurrent.futures import ThreadPoolExecutor, as_completed
 from pytimeparse2 import parse
 
 class Config:
@@ -54,14 +53,13 @@ class MovingMapping:
         else:
             return NoopRewriter(source, destination)
         
-    def needs_moving(self) -> int:
+    async def needs_moving(self) -> int:
         total, used, _ = shutil.disk_usage(self.source)
         percent_used = round((used / total) * 100, 4)
         threshold_bytes = used - int(total * (self.threshold / 100))
         
         if threshold_bytes > 0:
-            for client in self.clients:
-                client.scan(self.source)
+            await asyncio.gather(*(client.scan(self.source) for client in self.clients))
             
             logging.debug("Space usage: %.4g%% is above moving threshold: %.4g%%. Starting %s...", percent_used, self.threshold, self.source)
             return threshold_bytes
@@ -69,7 +67,7 @@ class MovingMapping:
         logging.info("Space usage: %.4g%% is below moving threshold: %.4g%%. Skipping %s...", percent_used, self.threshold, self.source)
         return 0
 
-    def can_move_to_source(self) -> int:
+    async def can_move_to_source(self) -> int:
         if not self.cache_threshold:
             return 0
         
@@ -78,8 +76,13 @@ class MovingMapping:
         threshold_bytes = int(total * (self.cache_threshold / 100)) - used
         
         if threshold_bytes > 0:
-            for client in self.clients:
-                client.scan(self.destination)
+            results = await asyncio.gather(*(plex.continue_watching for plex in self.plex))
+            
+            if all(not r for r in results):
+                logging.info("No continue watching items from any Plex client. Skipping %s...", self.source)
+                return 0
+            
+            await asyncio.gather(*(client.scan(self.destination) for client in self.clients))
                 
             logging.debug("Space usage: %.4g%% is below cache threshold: %.4g%%. Starting %s...", percent_used, self.cache_threshold, self.source)
             return threshold_bytes
@@ -88,7 +91,7 @@ class MovingMapping:
         return 0
     
     async def eligible_for_source(self) -> List[str]:
-        results = await asyncio.gather(*(plex.continue_watching() for plex in self.plex))
+        results = await asyncio.gather(*(plex.continue_watching for plex in self.plex))
         return [i for plex in results for i in plex]
     
     def get_src_file(self, path: str) -> str:

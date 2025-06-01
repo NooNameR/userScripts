@@ -2,7 +2,6 @@ import os
 import sys
 import asyncio
 import logging
-import threading
 from functools import cached_property
 from ..rewriter import Rewriter
 from .seeding_client import SeedingClient
@@ -12,8 +11,6 @@ from ..helpers import execute, get_stat
 from datetime import datetime
 
 class Qbit(SeedingClient):
-    _lock = threading.Lock()
-    
     def __init__(self, now: datetime, rewriter: Rewriter, host: str, user: str, password: str):
         self.now = now.timestamp()
         self.rewriter: Rewriter = rewriter
@@ -23,9 +20,7 @@ class Qbit(SeedingClient):
         self.paused_torrents = []
         self.seen: Set[str] = set()
         self.cache = defaultdict(list)
-        self.tasks = []
-        self._tasks_lock = threading.Lock()
-        self._lock = threading.Lock()
+        self.sem: asyncio.Semaphore = asyncio.Semaphore(1)
         
     @cached_property
     def __client(self):
@@ -48,25 +43,19 @@ class Qbit(SeedingClient):
     
     @cached_property
     def __torrents(self):
-        with self._lock:
-            return self.__client.torrents.info(status_filter="completed", sort="completion_on", reverse=True)
+        return self.__client.torrents.info(status_filter="completed", sort="completion_on", reverse=True)
     
     async def __get_torrents(self, inode: int):
-        tasks = []
-        with self._tasks_lock:
-            tasks = self.tasks
-            self.tasks.clear()
-                
-        if tasks:
-            await asyncio.gather(*tasks)
-            
-        return self.cache[inode]
+        async with self.sem:
+            return list(self.cache[inode])
         
-    def scan(self, root: str) -> None:
+    async def scan(self, root: str) -> None:
         if root in self.seen:
             return
         
         logging.info("[%s] Scanning torrents on %s...", self, root)
+        
+        await self.sem.acquire()
         
         def submit():
             total = 0
@@ -86,9 +75,14 @@ class Qbit(SeedingClient):
         
             logging.info("[%s] Found %d torrents on %s", self, total, root)
         
-        self.seen.add(root)
-        with self._tasks_lock:
-            self.tasks.append(asyncio.create_task(asyncio.to_thread(submit)))
+        async def wrapper():
+            try:
+                await asyncio.to_thread(submit)
+                self.seen.add(root)
+            finally:
+                self.sem.release()
+        
+        asyncio.create_task(wrapper())
 
     async def get_sort_key(self, path: str) -> Set[Tuple[int, int]]:
         inode = get_stat(path).st_ino
