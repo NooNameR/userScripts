@@ -107,7 +107,7 @@ class Qbit(SeedingClient):
             execute(torrent.resume)
 
     def __str__(self):
-        return self.host
+        return f"qbittorrent@{self.host}"
 
     def __repr__(self):
         return self.__str__()

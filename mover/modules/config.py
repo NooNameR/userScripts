@@ -5,6 +5,7 @@ import shutil
 import logging
 import asyncio
 from .media.plex import Plex
+from .media.jellyfin import Jellyfin
 from .media.media_player import MediaPlayer
 from .seeding.qbit import Qbit
 from .seeding.seeding_client import SeedingClient
@@ -43,7 +44,7 @@ class MovingMapping:
         self.min_age: int = parse(raw.get("min_age", "2h"))
         self.max_age: int = parse(raw.get("max_age")) if raw.get("max_age") else float('inf')
         self.clients: List[SeedingClient] = [Qbit(now=self.now, rewriter=self.__parse_rewriter(self.source, self.destination, client.pop("rewrite", {})), **client) for client in raw.get("clients", [])]
-        self.plex: List[MediaPlayer] = [Plex(now=self.now, rewriter=self.__parse_rewriter(self.source, self.destination, client.pop("rewrite", {})), **client) for client in raw.get("plex", [])]
+        self.media: List[MediaPlayer] = [Plex(now=self.now, rewriter=self.__parse_rewriter(self.source, self.destination, client.pop("rewrite", {})), **client) for client in raw.get("plex", [])] + [Jellyfin(now=self.now, rewriter=self.__parse_rewriter(self.source, self.destination, client.pop("rewrite", {})), **client) for client in raw.get("jellyfin", [])]
         self.ignores: Set[str] = set(raw.get("ignore", []))
         
     def __parse_rewriter(self, source: str, destination: str, rewrite: Dict[str, str] = {}) -> Rewriter:
@@ -76,7 +77,7 @@ class MovingMapping:
         threshold_bytes = int(total * (self.cache_threshold / 100)) - used
         
         if threshold_bytes > 0:
-            results = await asyncio.gather(*(plex.continue_watching for plex in self.plex))
+            results = await asyncio.gather(*(media.continue_watching for media in self.media))
             
             if all(not r for r in results):
                 logging.info("No continue watching items from any Plex client. Skipping %s...", self.source)
@@ -91,8 +92,20 @@ class MovingMapping:
         return 0
     
     async def eligible_for_source(self) -> List[str]:
-        results = await asyncio.gather(*(plex.continue_watching for plex in self.plex))
-        return [i for plex in results for i in plex]
+        seen: Set[str] = set()
+        result: List[str] = []
+        results = await asyncio.gather(*(media.continue_watching for media in self.media))
+
+        max_len = max((len(lst) for lst in results), default=0)
+        for i in range(max_len):
+            for lst in results:
+                if i >= len(lst) or lst[i] in seen:
+                    continue
+                
+                seen.add(lst[i])
+                result.append(lst[i])
+
+        return result.keys()
     
     def get_src_file(self, path: str) -> str:
         rel_path = os.path.relpath(path, self.destination)
@@ -114,21 +127,21 @@ class MovingMapping:
             return (1, 0, 0, 0, 0, 0)
         
         qbit_results: List[Tuple[int, int]]
-        plex_results: List[int]
+        media_results: List[int]
     
-        qbit_results, plex_results = await asyncio.gather(
+        qbit_results, media_results = await asyncio.gather(
             asyncio.gather(*(qbit.get_sort_key(path) for qbit in self.clients)),
-            asyncio.gather(*(plex.get_sort_key(path) for plex in self.plex))
+            asyncio.gather(*(media.get_sort_key(path) for media in self.media))
         )
 
         completion_age, num_seeders = min({(min(a for a, _ in res), min(n for _, n in res)) for res in qbit_results if res}, default=(0, 0))
-        plex_key = max(plex_results, default = 0)
+        media_key = max(media_results, default = 0)
         has_torrent = 1 if qbit_results else 0
         size = get_stat(path).st_size
         
         return (
             # age_priority,       # 1. age_priority (0 if within age range, else 1)
-            plex_key,           # 2. plex un-watched -> 1, watched 0
+            media_key,          # 2. media un-watched -> 1, watched 0
             has_torrent,        # 3. has_torrent (0 if has torrents, else 1)
             -completion_age,    # 4. -completion_age (negative to prioritize older completion age)
             -num_seeders,       # 5. -num_seeders (negative to prioritize more seeders)
@@ -142,7 +155,7 @@ class MovingMapping:
         return self.min_age <= age <= self.max_age
     
     async def is_active(self, file: str) -> bool:
-        tasks = [asyncio.create_task(plex.is_active(file)) for plex in self.plex]
+        tasks = [asyncio.create_task(media.is_active(file)) for media in self.media]
         
         result = False
         for coro in asyncio.as_completed(tasks):
@@ -172,6 +185,6 @@ class MovingMapping:
             f"       Cache Threshold: {self.cache_threshold:.4g}%\n"
             f"       Age range: {timedelta(seconds=self.min_age)} – {"..." if self.max_age == float('inf') else timedelta(seconds=self.max_age)}\n"
             f"       Clients: [{', '.join(map(str, self.clients))}]\n"
-            f"       Plex: [{', '.join(map(str, self.plex))}]\n"
+            f"       Media Clients: [{', '.join(map(str, self.media))}]\n"
             f"       Ignore patterns: [{', '.join(map(str, self.ignores))}]"
         )
