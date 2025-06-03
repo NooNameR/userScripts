@@ -18,6 +18,7 @@ class Plex(MediaPlayer):
         self.libraries: Set[str] = set(libraries)
         self.users: Set[str] = set(users)
         self._lock = threading.Lock()
+        self.logger = logging.getLogger(__name__)
         
     @cached_property
     def __plex(self):
@@ -34,7 +35,7 @@ class Plex(MediaPlayer):
         try:
             from plexapi.server import PlexServer
         except ModuleNotFoundError:
-            logging.error('Requirements Error: plexapi not installed. Please install using the command "pip install plexapi"')
+            self.logger.error('Requirements Error: plexapi not installed. Please install using the command "pip install plexapi"')
             sys.exit(1)
             
         return PlexServer(self.url, token)
@@ -48,7 +49,7 @@ class Plex(MediaPlayer):
                 for part in media.parts:
                     path = self.rewriter.on_source(part.file)
                     if os.path.exists(path):
-                        logging.debug("[%s] Non-Watched %s: %s (%s)", self, item.type, item.title, path)
+                        self.logger.debug("[%s] Non-Watched %s: %s (%s)", self, item.type, item.title, path)
                         await queue.put(path)
                         
         async def process_section(section):
@@ -74,7 +75,7 @@ class Plex(MediaPlayer):
             while not queue.empty():
                 not_watched.add(await queue.get())
                 
-            logging.info("[%s] Found %d not-watched files in the plex library", self, len(not_watched))
+            self.logger.info("[%s] Found %d not-watched files in the plex library", self, len(not_watched))
             return not_watched
                                     
         return asyncio.create_task(process())
@@ -153,7 +154,7 @@ class Plex(MediaPlayer):
                     await pq.put((key, index, detination_path))
                     total += 1
                 
-        logging.info("[%s] Detected %d watching files not currently available on source drives in Plex library", self, total)
+        self.logger.info("[%s] Detected %d watching files not currently available on source drives in Plex library", self, total)
     
     @cached_property
     def __continue_watching(self) -> asyncio.Task[List[List[Set[str]]]]:
@@ -175,11 +176,11 @@ class Plex(MediaPlayer):
             continue_watching = await asyncio.to_thread(server.continueWatching)
             for item in sorted(continue_watching, key=lambda i: i.lastViewedAt or 0, reverse=True):
                 if self.libraries and item.librarySectionTitle not in self.libraries:
-                    logging.debug("[%s] Item: %s is in %s library skipping...", self, item.title, item.librarySectionTitle)
+                    self.logger.debug("[%s] Item: %s is in %s library skipping...", self, item.title, item.librarySectionTitle)
                     continue
                 
                 if not item.lastViewedAt or item.lastViewedAt < cutoff:
-                    logging.debug("[%s] Item: %s last watched at %s (cutoff: %s) — skipping...", self, item.title, item.lastViewedAt or "?", cutoff)
+                    self.logger.debug("[%s] Item: %s last watched at %s (cutoff: %s) — skipping...", self, item.title, item.lastViewedAt or "?", cutoff)
                     continue
                 
                 if item.type == 'movie':
@@ -212,7 +213,7 @@ class Plex(MediaPlayer):
                 
                 result.append((key, temp))
             
-            logging.info("[%s] Detected %d watching files in Plex library", self, len(result))
+            self.logger.info("[%s] Detected %d watching files in Plex library", self, len(result))
             return result
                     
         return asyncio.create_task(process())

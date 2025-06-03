@@ -18,6 +18,7 @@ class Jellyfin(MediaPlayer):
         self.libraries = set(libraries)
         self.users = set(users)
         self._lock = threading.Lock()
+        self.logger = logging.getLogger(__name__)
 
     @cached_property 
     def _client(self):
@@ -91,7 +92,7 @@ class Jellyfin(MediaPlayer):
                         if path:
                             local_path = self.rewriter.on_source(path)
                             if os.path.exists(local_path):
-                                logging.debug("Unwatched %s: %s (%s)", item.get("Type"), item.get("Name"), local_path)
+                                self.logger.debug("Unwatched %s: %s (%s)", item.get("Type"), item.get("Name"), local_path)
                                 found.add(local_path)
                 return found
 
@@ -103,7 +104,7 @@ class Jellyfin(MediaPlayer):
                 *(get_for_user_id(user, lib_ids) for user, lib_ids in (await self._get_library_ids).items())
             )
             not_watched = set(p for paths in user_results for p in paths)
-            logging.info("[%s] Found %d not-watched files in the Jellyfin library", self, len(not_watched))
+            self.logger.info("[%s] Found %d not-watched files in the Jellyfin library", self, len(not_watched))
             return not_watched
 
         return asyncio.create_task(process())
@@ -152,7 +153,7 @@ class Jellyfin(MediaPlayer):
                     await pq.put((key, index, detination_path))
                     total += 1
                 
-        logging.info("[%s] Detected %d watching files not currently available on source drives in Jellyfin library", self, total)
+        self.logger.info("[%s] Detected %d watching files not currently available on source drives in Jellyfin library", self, total)
     
     @cached_property
     def __continue_watching_on_source(self) -> asyncio.Task[Set[str]]:
@@ -261,7 +262,7 @@ class Jellyfin(MediaPlayer):
                 
                 result.append((key, temp))
             
-            logging.info("[%s] Detected %d watching files in Jellyfin library", self, len(result))
+            self.logger.info("[%s] Detected %d watching files in Jellyfin library", self, len(result))
             return result
         
         return asyncio.create_task(process())

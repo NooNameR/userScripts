@@ -21,6 +21,7 @@ class Qbit(SeedingClient):
         self.seen: Set[str] = set()
         self.cache = defaultdict(list)
         self.sem: asyncio.Semaphore = asyncio.Semaphore(1)
+        self.logger = logging.getLogger(__name__)
         
     @cached_property
     def __client(self):
@@ -29,7 +30,7 @@ class Qbit(SeedingClient):
             from qbittorrentapi import Client
             from qbittorrentapi import LoginFailed
         except ModuleNotFoundError:
-            logging.error('Requirements Error: qbittorrent-api not installed. Please install using the command "pip install qbittorrent-api"')
+            self.logger.error('Requirements Error: qbittorrent-api not installed. Please install using the command "pip install qbittorrent-api"')
             sys.exit(1)
             
         try:
@@ -53,7 +54,7 @@ class Qbit(SeedingClient):
         if root in self.seen:
             return
         
-        logging.info("[%s] Scanning torrents on %s...", self, root)
+        self.logger.info("[%s] Scanning torrents on %s...", self, root)
         
         await self.sem.acquire()
         
@@ -73,7 +74,7 @@ class Qbit(SeedingClient):
                     
                 total += 1
         
-            logging.info("[%s] Found %d torrents on %s", self, total, root)
+            self.logger.info("[%s] Found %d torrents on %s", self, total, root)
         
         async def wrapper():
             try:
@@ -96,14 +97,14 @@ class Qbit(SeedingClient):
             if torrent in self.paused_torrents:
                 continue
             
-            logging.info("[%s] [%s] Pausing torrent: %s [%d] -> %s", self, torrent.hash, torrent.name, torrent.added_on, torrent.content_path)
+            self.logger.info("[%s] [%s] Pausing torrent: %s [%d] -> %s", self, torrent.hash, torrent.name, torrent.added_on, torrent.content_path)
             execute(torrent.pause)
             self.paused_torrents.append(torrent)
         
     async def resume(self):
         while self.paused_torrents:
             torrent = self.paused_torrents.pop()
-            logging.info("[%s] [%s] Resuming torrent: %s [%d] -> %s", self, torrent.hash, torrent.name, torrent.added_on, torrent.content_path)
+            self.logger.info("[%s] [%s] Resuming torrent: %s [%d] -> %s", self, torrent.hash, torrent.name, torrent.added_on, torrent.content_path)
             execute(torrent.resume)
 
     def __str__(self):

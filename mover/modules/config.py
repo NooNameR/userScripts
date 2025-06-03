@@ -12,9 +12,9 @@ from .seeding.seeding_client import SeedingClient
 from .helpers import get_ctime, get_stat
 from datetime import datetime, timedelta
 from typing import Dict, Tuple, Set, List
+from functools import cached_property
 from .rewriter import Rewriter, RealRewriter, NoopRewriter
 from pytimeparse2 import parse
-from functools import cached_property
 
 class Config:
     def __init__(self, now: datetime, path='config.yaml'):
@@ -37,6 +37,7 @@ class Config:
 
 class MovingMapping:   
     def __init__(self, now: datetime, raw):
+        self.logger = logging.getLogger(__name__)
         self.now: datetime = now
         self.source: str = raw["source"]
         self.destination: str = raw["destination"]
@@ -63,10 +64,10 @@ class MovingMapping:
         if threshold_bytes > 0:
             await asyncio.gather(*(client.scan(self.source) for client in self.clients))
             
-            logging.debug("Space usage: %.4g%% is above moving threshold: %.4g%%. Starting %s...", percent_used, self.threshold, self.source)
+            self.logger.debug("Space usage: %.4g%% is above moving threshold: %.4g%%. Starting %s...", percent_used, self.threshold, self.source)
             return threshold_bytes
         
-        logging.info("Space usage: %.4g%% is below moving threshold: %.4g%%. Skipping %s...", percent_used, self.threshold, self.source)
+        self.logger.info("Space usage: %.4g%% is below moving threshold: %.4g%%. Skipping %s...", percent_used, self.threshold, self.source)
         return 0
 
     async def can_move_to_source(self) -> int:
@@ -81,15 +82,15 @@ class MovingMapping:
             results = await self.eligible_for_source
             
             if not results:
-                logging.info("No continue watching items from any Media client. Skipping %s...", self.source)
+                self.logger.info("No continue watching items from any Media client. Skipping %s...", self.source)
                 return 0
             
             await asyncio.gather(*(client.scan(self.destination) for client in self.clients))
                 
-            logging.debug("Space usage: %.4g%% is below cache threshold: %.4g%%. Starting %s...", percent_used, self.cache_threshold, self.source)
+            self.logger.debug("Space usage: %.4g%% is below cache threshold: %.4g%%. Starting %s...", percent_used, self.cache_threshold, self.source)
             return threshold_bytes
         
-        logging.info("Space usage: %.4g%% is above cache threshold: %.4g%%. Skipping %s...", percent_used, self.cache_threshold, self.source)
+        self.logger.info("Space usage: %.4g%% is above cache threshold: %.4g%%. Skipping %s...", percent_used, self.cache_threshold, self.source)
         return 0
     
     @cached_property
