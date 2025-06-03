@@ -129,7 +129,7 @@ async def move_to_source(mapping: MovingMapping) -> int:
     if not can_move:
         return 0
     
-    files_to_move: List[str] = await mapping.eligible_for_source()
+    files_to_move: List[str] = await mapping.eligible_for_source
     if not files_to_move:
         return 0
     

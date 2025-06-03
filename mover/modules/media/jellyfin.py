@@ -3,7 +3,7 @@ import httpx
 import asyncio
 import logging
 import threading
-from typing import Set, List
+from typing import Set, List, Tuple
 from datetime import timedelta, datetime, timezone
 from .media_player import MediaPlayer, MediaPlayerType
 from ..rewriter import Rewriter
@@ -22,6 +22,8 @@ class Jellyfin(MediaPlayer):
     @cached_property 
     def _client(self):
         with self._lock:
+            logging.getLogger("httpx").setLevel(logging.WARNING)
+            
             return httpx.AsyncClient(
                 base_url=self.url, 
                 headers={
@@ -126,43 +128,38 @@ class Jellyfin(MediaPlayer):
         
         return (1 if path in not_watched else 0) + (1 if path in continue_watching else 0)
     
-    @cached_property
-    def continue_watching(self) -> asyncio.Task[List[str]]:
-        async def process():
-            result: List[str] = []
-            max_count: int = 25
-            on_source = await self.__continue_watching_on_source
-            
-            for bucket in await self.__continue_watching:
-                remaining = max_count
-                for item in bucket:
-                    if not remaining:
-                        break
-                    
-                    remaining -= 1
-                    
-                    for path in item:
-                        source_path = self.rewriter.on_source(path)
-                        if source_path in on_source:
-                            continue
-                        
-                        detination_path = self.rewriter.on_destination(path)
-                        if not os.path.exists(detination_path):
-                            continue
-                        result.append(detination_path)
-                    
-            logging.info("[%s] Detected %d watching files not currently available on source drives in Plex library", self, len(result))
-            
-            return result
+    async def continue_watching(self, pq: asyncio.Queue[Tuple[float, int, str]]) -> None:
+        total: int = 0
+        max_count: int = 25
+        on_source = await self.__continue_watching_on_source
         
-        return asyncio.create_task(process())
+        for key, bucket in await self.__continue_watching:
+            remaining = max_count
+            for item in bucket:
+                if not remaining:
+                    break
+                
+                remaining -= 1
+                
+                for index, path in enumerate(item):
+                    source_path = self.rewriter.on_source(path)
+                    if source_path in on_source:
+                        continue
+                    
+                    detination_path = self.rewriter.on_destination(path)
+                    if not os.path.exists(detination_path):
+                        continue
+                    await pq.put((key, index, detination_path))
+                    total += 1
+                
+        logging.info("[%s] Detected %d watching files not currently available on source drives in Jellyfin library", self, total)
     
     @cached_property
     def __continue_watching_on_source(self) -> asyncio.Task[Set[str]]:
         async def process():
             return {
                 self.rewriter.on_source(path)
-                for bucket in await self.__continue_watching
+                for _, bucket in await self.__continue_watching
                 for media in bucket
                 for path in media
                 if os.path.exists(self.rewriter.on_source(path))
@@ -171,7 +168,7 @@ class Jellyfin(MediaPlayer):
         return asyncio.create_task(process())
 
     @cached_property
-    def __continue_watching(self) -> asyncio.Task[List[List[Set[str]]]]:
+    def __continue_watching(self) -> asyncio.Task[List[Tuple[float,List[Set[str]]]]]:
         cutoff = self.now - timedelta(weeks=1)
         pq = asyncio.PriorityQueue()
         
@@ -251,7 +248,7 @@ class Jellyfin(MediaPlayer):
             result: List[List[Set[str]]] = []
             processed: Set[str] = set()
             while not pq.empty():
-                _, media_list = await pq.get()
+                key, media_list = await pq.get()
                 temp: List[Set[str]] = []
                 for media in media_list:
                     m: Set[str] = set()
@@ -262,7 +259,7 @@ class Jellyfin(MediaPlayer):
                         m.add(path)
                     temp.append(m)
                 
-                result.append(temp)
+                result.append((key, temp))
             
             logging.info("[%s] Detected %d watching files in Jellyfin library", self, len(result))
             return result

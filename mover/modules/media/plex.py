@@ -5,7 +5,7 @@ import asyncio
 import threading
 from .media_player import MediaPlayer, MediaPlayerType
 from ..rewriter import Rewriter
-from typing import Set, List
+from typing import Set, List, Tuple
 from datetime import datetime, timedelta
 from functools import cached_property
 
@@ -114,7 +114,7 @@ class Plex(MediaPlayer):
         async def process():
             return {
                 self.rewriter.on_source(path)
-                for bucket in await self.__continue_watching
+                for _, bucket in await self.__continue_watching
                 for media in bucket
                 for path in media
                 if os.path.exists(self.rewriter.on_source(path))
@@ -130,34 +130,30 @@ class Plex(MediaPlayer):
         
         return (1 if path in not_watched else 0) + (1 if path in continue_watching else 0)
     
-    @cached_property
-    def continue_watching(self) -> asyncio.Task[List[str]]:
-        async def process():
-            result: List[str] = []
-            max_count: int = 25
-            
-            for bucket in await self.__continue_watching:
-                remaining = max_count
-                for item in bucket:
-                    if not remaining:
-                        break
-                    
-                    remaining -= 1
-                    
-                    for path in item:
-                        source_path = self.rewriter.on_source(path)
-                        if source_path in await self.__continue_watching_on_source:
-                            continue
-                        
-                        detination_path = self.rewriter.on_destination(path)
-                        if not os.path.exists(detination_path):
-                            continue
-                        result.append(detination_path)
-                    
-            logging.info("[%s] Detected %d watching files not currently available on source drives in Plex library", self, len(result))
-            return result
+    async def continue_watching(self, pq: asyncio.Queue[Tuple[float, int, str]]) -> None:
+        max_count: int = 25
+        total: int = 0
         
-        return asyncio.create_task(process())
+        for key, bucket in await self.__continue_watching:
+            remaining = max_count
+            for item in bucket:
+                if not remaining:
+                    break
+                
+                remaining -= 1
+                
+                for index, path in enumerate(item):
+                    source_path = self.rewriter.on_source(path)
+                    if source_path in await self.__continue_watching_on_source:
+                        continue
+                    
+                    detination_path = self.rewriter.on_destination(path)
+                    if not os.path.exists(detination_path):
+                        continue
+                    await pq.put((key, index, detination_path))
+                    total += 1
+                
+        logging.info("[%s] Detected %d watching files not currently available on source drives in Plex library", self, total)
     
     @cached_property
     def __continue_watching(self) -> asyncio.Task[List[List[Set[str]]]]:
@@ -192,18 +188,18 @@ class Plex(MediaPlayer):
                 elif item.type == 'episode':
                     show = item.show()
                     key = (item.seasonNumber, item.index + 1) if should_skip(item) else (item.seasonNumber, item.index)
-                    temp = []
+                    temp: List[Set[str]] = []
                     for episode in sorted([e for e in show.episodes() if (e.seasonNumber, e.index) >= key], key=lambda e: (e.seasonNumber, e.index)):
                         temp.append(__populate_watching(episode))
                     await pq.put((-item.lastViewedAt.timestamp(), temp))
         
-        async def process() -> List[List[Set[str]]]:
+        async def process() -> List[Tuple[float, List[Set[str]]]]:
             await asyncio.gather(*(get_continue_watching(server) for server in self.__plex_servers))
             
             result: List[List[Set[str]]] = []
             processed: Set[str] = set()
             while not pq.empty():
-                _, media_list = await pq.get()
+                key, media_list = await pq.get()
                 temp: List[Set[str]] = []
                 for media in media_list:
                     m: Set[str] = set()
@@ -214,7 +210,7 @@ class Plex(MediaPlayer):
                         m.add(path)
                     temp.append(m)
                 
-                result.append(temp)
+                result.append((key, temp))
             
             logging.info("[%s] Detected %d watching files in Plex library", self, len(result))
             return result

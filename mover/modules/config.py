@@ -14,6 +14,7 @@ from datetime import datetime, timedelta
 from typing import Dict, Tuple, Set, List
 from .rewriter import Rewriter, RealRewriter, NoopRewriter
 from pytimeparse2 import parse
+from functools import cached_property
 
 class Config:
     def __init__(self, now: datetime, path='config.yaml'):
@@ -77,10 +78,10 @@ class MovingMapping:
         threshold_bytes = int(total * (self.cache_threshold / 100)) - used
         
         if threshold_bytes > 0:
-            results = await asyncio.gather(*(media.continue_watching for media in self.media))
+            results = await self.eligible_for_source
             
-            if all(not r for r in results):
-                logging.info("No continue watching items from any Plex client. Skipping %s...", self.source)
+            if not results:
+                logging.info("No continue watching items from any Media client. Skipping %s...", self.source)
                 return 0
             
             await asyncio.gather(*(client.scan(self.destination) for client in self.clients))
@@ -91,21 +92,28 @@ class MovingMapping:
         logging.info("Space usage: %.4g%% is above cache threshold: %.4g%%. Skipping %s...", percent_used, self.cache_threshold, self.source)
         return 0
     
-    async def eligible_for_source(self) -> List[str]:
+    @cached_property
+    def eligible_for_source(self) -> asyncio.Future[List[str]]:
+        pq: asyncio.PriorityQueue[Tuple[float, int, str]] = asyncio.PriorityQueue()
         seen: Set[str] = set()
         result: List[str] = []
-        results = await asyncio.gather(*(media.continue_watching for media in self.media))
-
-        max_len = max((len(lst) for lst in results), default=0)
-        for i in range(max_len):
-            for lst in results:
-                if i >= len(lst) or lst[i] in seen:
+        tasks = asyncio.gather(*(media.continue_watching(pq) for media in self.media))
+        
+        async def process():
+            await tasks
+            
+            while not pq.empty():
+                _, _, path = await pq.get()
+                
+                if path in seen:
                     continue
                 
-                seen.add(lst[i])
-                result.append(lst[i])
-
-        return result.keys()
+                result.append(path)
+                seen.add(path)
+            
+            return result
+            
+        return asyncio.create_task(process())
     
     def get_src_file(self, path: str) -> str:
         rel_path = os.path.relpath(path, self.destination)
