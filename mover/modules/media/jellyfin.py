@@ -21,7 +21,7 @@ class Jellyfin(MediaPlayer):
         self.logger = logging.getLogger(__name__)
 
     @cached_property 
-    def _client(self):
+    def _client(self) -> httpx.AsyncClient:
         with self._lock:
             logging.getLogger("httpx").setLevel(logging.WARNING)
             
@@ -277,5 +277,5 @@ class Jellyfin(MediaPlayer):
     def __repr__(self):
         return str(self)
 
-    async def close(self):
+    async def aclose(self):
         await self._client.aclose()

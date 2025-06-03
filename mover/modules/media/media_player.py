@@ -23,3 +23,7 @@ class MediaPlayer(ABC):
     @abstractmethod
     async def continue_watching(self, pq: Queue[Tuple[float, int, str]]) -> None:
         pass
+    
+    @abstractmethod
+    async def aclose(self) -> None:
+        pass

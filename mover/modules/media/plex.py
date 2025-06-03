@@ -227,3 +227,6 @@ class Plex(MediaPlayer):
     @property
     def type(self):
         return MediaPlayerType.PLEX
+    
+    async def aclose(self):
+        pass

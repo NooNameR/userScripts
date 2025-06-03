@@ -3,17 +3,17 @@ from typing import Set, Tuple
 
 class SeedingClient(ABC):
     @abstractmethod
-    def scan(self, root: str) -> None:
+    async def scan(self, root: str) -> None:
         pass
     
     @abstractmethod
-    def pause(self, path: str) -> None:
+    async def pause(self, path: str) -> None:
         pass
     
     @abstractmethod
-    def resume(self) -> None:
+    async def get_sort_key(self, path: str) -> Set[Tuple[int, int]]:
         pass
     
     @abstractmethod
-    def get_sort_key(self, path: str) -> Set[Tuple[int, int]]:
+    async def aclose() -> None:
         pass

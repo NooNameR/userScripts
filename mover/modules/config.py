@@ -35,7 +35,7 @@ class Config:
             out.append(f"    {i}. {mapping}")
         return "\n".join(out)
 
-class MovingMapping:   
+class MovingMapping:
     def __init__(self, now: datetime, raw):
         self.logger = logging.getLogger(__name__)
         self.now: datetime = now
@@ -197,3 +197,6 @@ class MovingMapping:
             f"       Media Clients: [{', '.join(map(str, self.media))}]\n"
             f"       Ignore patterns: [{', '.join(map(str, self.ignores))}]"
         )
+        
+    async def aclose(self):
+        await asyncio.gather(*([media.aclose() for media in self.media] + [client.aclose() for client in self.clients]))

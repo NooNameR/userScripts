@@ -177,7 +177,7 @@ async def main(args, config: Config):
         except Exception as e:
             logging.error("Error: %s", e, exc_info=True)
         finally:
-            await mapping.resume()
+            await mapping.aclose()
                 
 if __name__ == "__main__":
     import argparse

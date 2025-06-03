@@ -90,7 +90,7 @@ class Qbit(SeedingClient):
         torrents = await self.__get_torrents(inode)
         return {(self.now - torrent.completion_on, torrent.num_seeds) for torrent in torrents}
         
-    async def pause(self, path: str):
+    async def pause(self, path: str) -> None:
         inode = get_stat(path).st_ino
         torrents = await self.__get_torrents(inode)
         for torrent in torrents:
@@ -101,11 +101,14 @@ class Qbit(SeedingClient):
             execute(torrent.pause)
             self.paused_torrents.append(torrent)
         
-    async def resume(self):
+    async def resume(self) -> None:
         while self.paused_torrents:
             torrent = self.paused_torrents.pop()
             self.logger.info("[%s] [%s] Resuming torrent: %s [%d] -> %s", self, torrent.hash, torrent.name, torrent.added_on, torrent.content_path)
             execute(torrent.resume)
+            
+    async def aclose(self) -> None:
+        await self.resume()
 
     def __str__(self):
         return f"qbittorrent@{self.host}"
