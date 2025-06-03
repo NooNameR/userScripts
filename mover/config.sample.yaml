@@ -44,6 +44,23 @@ mappings:
         users:
           - "username_1"
           - "username_2"
+    jellyfin:
+      - url: http://localhost:8096
+        api_key: !ENV JELLYFIN_API_KEY
+        # we need to be able to match host path with container path
+        rewrite:
+          # container mount point for plex
+          from: "/data"
+          # host path on source
+          to: "/mnt/data-cache/data"
+        # Include only these libraries into plex checks, remove it to traverse all libraries
+        libraries:
+          - "TV Shows"
+          - "Movies"
+        # Include only these users into plex checks, remove it to traverse all users
+        users:
+          - "username_1"
+          - "username_2"
     ignore:
       - "**/.Orphaned"
       - "**/.RecycleBin"
