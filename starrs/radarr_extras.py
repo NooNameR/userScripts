@@ -160,8 +160,15 @@ def main():
         logger.info("%s - No trailers found on TMDb", movie_title)
         sys.exit(0)
     
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    cookies_path = os.path.join(script_dir, "cookies.txt")
+    cookies_str = None
+    if os.path.exists(cookies_path):
+        with open(cookies_path, "r", encoding="utf-8") as file:
+            cookies_str = file.read()
+    
     # to be able to match for Jellyfin and Plex
-    trailer_dirs = [os.path.join(movie_path, "Trailers"), os.path.join(movie_path, "trailers")]
+    trailer_dirs = [os.path.join(movie_path, "Trailers")]
     
     for trailer in trailers:
         trailer_key = trailer.get("key")
@@ -184,6 +191,9 @@ def main():
             "folder": f"/trailers/{language}",
             "cli": f"--geo-bypass --geo-bypass-country {country} --proxy {proxy} --write-subs --sub-lang {lang} --embed-subs"
         }
+        
+        if cookies_str:
+            payload["cookies"]=cookies_str
 
         logger.info("%s - Sending download request to ytptube /history", movie_title)
         status_code, body = http_post(
