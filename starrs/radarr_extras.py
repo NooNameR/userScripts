@@ -7,6 +7,7 @@ import urllib.request
 from urllib.error import URLError, HTTPError
 import logging
 import time
+from typing import List
 from logging.handlers import RotatingFileHandler
 
 script_name = "Radarr-Trailer"
@@ -110,18 +111,21 @@ def http_post(url, data, headers=None):
         logger.error("Request failed for %s - %s", url, e)
         return None, None
     
-def try_link(dir: str, youtube_id: str, retries=1, delay=0):
+def try_link(dirs: List[str], youtube_id: str, retries: int=1, delay: int=0):
     file = check_download_status(youtube_id, retries, delay)
     if not file:
         return False
     
-    dst = os.path.join(dir, os.path.basename(file))
-    if os.path.exists(dst):
-        logger.info("Skipping file: %s, already exists", dst)
-        return True
+    linked = False
+    for dir in dirs:
+        dst = os.path.join(dir, os.path.basename(file))
+        if not os.path.exists(dst):
+            linked = True
+            logger.info("Linking: %s to %s", file, dst)
+            os.link(file, dst)
     
-    logger.info("Linking: %s to %s", file, dst)
-    os.link(file, dst)
+    if not linked:
+        logger.info("Skipping file: %s, already exists", dst)
     return True
 
 def main():
@@ -155,16 +159,18 @@ def main():
     if not trailers:
         logger.info("%s - No trailers found on TMDb", movie_title)
         sys.exit(0)
-        
-    trailer_dir = os.path.join(movie_path, "Trailers")
+    
+    # to be able to match for Jellyfin and Plex
+    trailer_dirs = [os.path.join(movie_path, "Trailers"), os.path.join(movie_path, "trailers")]
     
     for trailer in trailers:
         trailer_key = trailer.get("key")
         trailer_title = trailer.get("name")
+        
+        for dir_ in trailer_dirs:
+            os.makedirs(dir_, exist_ok=True)
             
-        os.makedirs(trailer_dir, exist_ok=True)
-            
-        if try_link(trailer_dir, trailer_key):
+        if try_link(trailer_dirs, trailer_key):
             return
 
         logger.info("%s - Found trailer '%s' (Key: %s)", movie_title, trailer_title, trailer_key)
@@ -189,7 +195,7 @@ def main():
         if status_code == 200:
             logger.info("%s - Download request accepted by ytptube - response: %s", movie_title, body)
             
-            if try_link(trailer_dir, trailer_key, retries=5, delay=30):
+            if try_link(trailer_dirs, trailer_key, retries=5, delay=30):
                 return
         else:
             logger.error("%s - ytptube error response - %s (HTTP %d)", movie_title, body, status_code)
