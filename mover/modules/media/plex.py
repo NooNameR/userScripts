@@ -75,7 +75,7 @@ class Plex(MediaPlayer):
             while not queue.empty():
                 not_watched.add(await queue.get())
                 
-            self.logger.info("[%s] Found %d not-watched files in the plex library", self, len(not_watched))
+            self.logger.info("[%s] Found %d not-watched files in the Plex library", self, len(not_watched))
             return not_watched
                                     
         return asyncio.create_task(process())
@@ -159,7 +159,6 @@ class Plex(MediaPlayer):
     @cached_property
     def __continue_watching(self) -> asyncio.Task[List[List[Set[str]]]]:
         cutoff = self.now - timedelta(weeks=1)
-        active_items = self.__active_items()
         pq = asyncio.PriorityQueue()
         
         def __populate_watching(item):
@@ -171,7 +170,7 @@ class Plex(MediaPlayer):
 
         async def get_continue_watching(server):
             def should_skip(item):
-                return item.isWatched or item.ratingKey in active_items
+                return item.isWatched
                 
             continue_watching = await asyncio.to_thread(server.continueWatching)
             for item in sorted(continue_watching, key=lambda i: i.lastViewedAt or 0, reverse=True):
@@ -188,7 +187,7 @@ class Plex(MediaPlayer):
                         await pq.put((-item.lastViewedAt.timestamp(), [__populate_watching(item)]))
                 elif item.type == 'episode':
                     show = item.show()
-                    key = (item.seasonNumber, item.index + 1) if should_skip(item) else (item.seasonNumber, item.index)
+                    key = (item.seasonNumber, item.index + 1) if item.isWatched else (item.seasonNumber, item.index)
                     temp: List[Set[str]] = []
                     for episode in sorted([e for e in show.episodes() if (e.seasonNumber, e.index) >= key], key=lambda e: (e.seasonNumber, e.index)):
                         temp.append(__populate_watching(episode))

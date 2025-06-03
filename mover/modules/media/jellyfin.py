@@ -112,7 +112,7 @@ class Jellyfin(MediaPlayer):
     async def is_active(self, file: str) -> bool:
         sessions = await self._get("/Sessions")
         for session in sessions:
-            for item in filter(None, [session.get("NowPlayingItem"), session.get("NowViewingItem")]):
+            for item in filter(None, [session.get("NowPlayingItem")]):
                 for media in item.get("MediaSources", []):
                     path = media.get("Path")
                     if path:
