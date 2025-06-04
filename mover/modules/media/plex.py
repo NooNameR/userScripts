@@ -108,7 +108,7 @@ class Plex(MediaPlayer):
         return result
     
     def __active_items(self) -> Set[str]:
-        return set([session.ratingKey for session in self.__plex.sessions()])
+        return {session.ratingKey for session in self.__plex.sessions()}
     
     @cached_property
     def __continue_watching_on_source(self) -> asyncio.Task[Set[str]]:

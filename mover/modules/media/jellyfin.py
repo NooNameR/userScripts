@@ -49,7 +49,7 @@ class Jellyfin(MediaPlayer):
     def _get_users(self):
         async def process():
             users = await self._get("/Users")
-            return set([u["Id"] for u in users if not self.users or u["Name"] in self.users])
+            return {u["Id"] for u in users if not self.users or u["Name"] in self.users}
         
         return asyncio.create_task(process())
 
@@ -97,13 +97,13 @@ class Jellyfin(MediaPlayer):
                 return found
 
             results = await asyncio.gather(*(get_for_library(lib_id) for lib_id in allowed_ids))
-            return set([p for sub in results for p in sub])
+            return {p for sub in results for p in sub}
 
         async def process():
             user_results = await asyncio.gather(
                 *(get_for_user_id(user, lib_ids) for user, lib_ids in (await self._get_library_ids).items())
             )
-            not_watched = set(p for paths in user_results for p in paths)
+            not_watched = {p for paths in user_results for p in paths}
             self.logger.info("[%s] Found %d not-watched files in the Jellyfin library", self, len(not_watched))
             return not_watched
 
@@ -186,34 +186,36 @@ class Jellyfin(MediaPlayer):
                 nextup_items = (await self._get("/Shows/NextUp", {
                     "userId": user_id,
                     "parentId": library_id,
-                    "enableUserData": "true",
-                    "enableResumable": "true",
+                    "enableUserData": True,
+                    "enableResumable": True,
                     "nextUpDateCutoff": cutoff.isoformat(),
-                    "disableFirstEpisode": "true",
-                    "fields": ["MediaSources"],
+                    "disableFirstEpisode": True,
+                    "fields": "MediaSources",
                 })).get("Items", [])
 
                 for item in nextup_items:
                     temp = []
-                    series_id = item.get("SeriesId")
-                    if not series_id:
+                    if (series_id := item.get("SeriesId")) is None:
                         continue
                     
                     lastPlayedAt = parse_played_at(item)
                     season = item.get("SeasonNumber", 1)
                     index = item.get("IndexNumber", 1) - 1
 
-                    episodes = (await self._get(f"/Shows/{series_id}/Episodes", {
-                        "userId": user_id,
-                        "enableUserData": "true",
-                        "season": season,
-                        "startIndex": index,
-                        "fields": "MediaSources",
-                        "Recursive": True,
-                        "sortBy": "SeasonNumber,IndexNumber",
-                        "sortOrder": "Ascending",
-                    })).get("Items", [])
-                    while episodes:
+                    while True:
+                        episodes = (await self._get(f"/Shows/{series_id}/Episodes", {
+                            "userId": user_id,
+                            "enableUserData": True,
+                            "season": season,
+                            "startIndex": index,
+                            "fields": "MediaSources",
+                            "sortBy": "SeasonNumber,IndexNumber",
+                            "sortOrder": "Ascending",
+                        })).get("Items", [])
+                        
+                        if not episodes:
+                            break
+                        
                         for ep in episodes:
                             if ep.get("UserData", {}).get("Played"):
                                 lastPlayedAt = max(parse_played_at(ep), lastPlayedAt)
@@ -223,17 +225,6 @@ class Jellyfin(MediaPlayer):
                         
                         season += 1
                         index = 0
-                        
-                        episodes = (await self._get(f"/Shows/{series_id}/Episodes", {
-                            "userId": user_id,
-                            "enableUserData": "true",
-                            "season": season,
-                            "startIndex": index,
-                            "fields": "MediaSources",
-                            "Recursive": True,
-                            "sortBy": "SeasonNumber,IndexNumber",
-                            "sortOrder": "Ascending",
-                        })).get("Items", [])
                     
                     if lastPlayedAt < cutoff:
                         continue
