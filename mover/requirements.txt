@@ -3,3 +3,4 @@ pytimeparse2==1.7.1
 qbittorrent-api==2025.5.0
 plexapi==4.17.0
 httpx==0.28.1
+asyncstdlib>=3.13.1

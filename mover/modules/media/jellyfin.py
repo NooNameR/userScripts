@@ -8,6 +8,8 @@ from datetime import timedelta, datetime, timezone
 from .media_player import MediaPlayer, MediaPlayerType
 from ..rewriter import Rewriter
 from functools import cached_property
+from asyncstdlib import cached_property as acached_property
+from asyncstdlib.builtins import list as alist, map as amap, set as aset
 
 class Jellyfin(MediaPlayer):
     def __init__(self, now: datetime, rewriter: Rewriter, url: str, api_key: str, libraries: List[str] = [], users: List[str] = []):
@@ -20,7 +22,7 @@ class Jellyfin(MediaPlayer):
         self._lock = threading.Lock()
         self.logger = logging.getLogger(__name__)
 
-    @cached_property 
+    @cached_property
     def _client(self) -> httpx.AsyncClient:
         with self._lock:
             logging.getLogger("httpx").setLevel(logging.WARNING)
@@ -45,34 +47,27 @@ class Jellyfin(MediaPlayer):
         response.raise_for_status()
         return response.json()
 
-    @cached_property
-    def _get_users(self):
-        async def process():
-            users = await self._get("/Users")
-            return set([u["Id"] for u in users if not self.users or u["Name"] in self.users])
-        
-        return asyncio.create_task(process())
+    @acached_property
+    async def _get_users(self):
+        users = await self._get("/Users")
+        return {u["Id"] for u in users if not self.users or u["Name"] in self.users}
 
-    @cached_property
-    def _get_library_ids(self):
-        async def process():
-            user_ids = await self._get_users
-            
-            async def get_views(user_id):
-                views = await self._get(f"/Users/{user_id}/Views")
-                return user_id, {
-                    v["Id"]
-                    for v in views.get("Items", [])
-                    if not self.libraries or v["Name"] in self.libraries
-                }
-
-            # Run all in parallel, each returning (user_id, set_of_ids)
-            return dict(await asyncio.gather(*(get_views(uid) for uid in user_ids)))
-    
-        return asyncio.create_task(process())
+    @acached_property
+    async def _get_library_ids(self):
+        user_ids = await self._get_users
         
-    @cached_property
-    def not_watched_media(self) -> Set[str]:
+        async def get_views(user_id):
+            views = await self._get(f"/Users/{user_id}/Views")
+            return user_id, {
+                v["Id"]
+                for v in views.get("Items", [])
+                if not self.libraries or v["Name"] in self.libraries
+            }
+
+        return dict(await alist(amap(get_views, user_ids)))
+        
+    @acached_property
+    async def not_watched_media(self) -> Set[str]:
         async def get_for_user_id(user_id: str, allowed_ids: Set[str]) -> List[str]:
             async def get_for_library(library_id: str) -> List[str]:
                 found: Set[str] = set()
@@ -96,18 +91,14 @@ class Jellyfin(MediaPlayer):
                                 found.add(local_path)
                 return found
 
-            results = await asyncio.gather(*(get_for_library(lib_id) for lib_id in allowed_ids))
-            return set([p for sub in results for p in sub])
+            await aset(get_for_library(lib_id) for lib_id in allowed_ids)
 
-        async def process():
-            user_results = await asyncio.gather(
-                *(get_for_user_id(user, lib_ids) for user, lib_ids in (await self._get_library_ids).items())
-            )
-            not_watched = set(p for paths in user_results for p in paths)
-            self.logger.info("[%s] Found %d not-watched files in the Jellyfin library", self, len(not_watched))
-            return not_watched
-
-        return asyncio.create_task(process())
+        not_watched = await aset(
+            get_for_user_id(user, lib_ids) 
+            for user, lib_ids in (await self._get_library_ids).items()
+        )
+        self.logger.info("[%s] Found %d not-watched files in the Jellyfin library", self, len(not_watched))
+        return not_watched
 
     async def is_active(self, file: str) -> bool:
         sessions = await self._get("/Sessions")
@@ -155,34 +146,30 @@ class Jellyfin(MediaPlayer):
                 
         self.logger.info("[%s] Detected %d watching files not currently available on source drives in Jellyfin library", self, total)
     
-    @cached_property
-    def __continue_watching_on_source(self) -> asyncio.Task[Set[str]]:
-        async def process():
-            return {
-                self.rewriter.on_source(path)
-                for _, bucket in await self.__continue_watching
-                for media in bucket
-                for path in media
-                if os.path.exists(self.rewriter.on_source(path))
-            }
-        
-        return asyncio.create_task(process())
+    @acached_property
+    async def __continue_watching_on_source(self) -> Set[str]:
+        return {
+            self.rewriter.on_source(path)
+            for _, bucket in await self.__continue_watching
+            for media in bucket
+            for path in media
+            if os.path.exists(self.rewriter.on_source(path))
+        }
 
-    @cached_property
-    def __continue_watching(self) -> asyncio.Task[List[Tuple[float,List[Set[str]]]]]:
+    @acached_property
+    async def __continue_watching(self) -> List[Tuple[float, List[Set[str]]]]:
         cutoff = self.now - timedelta(weeks=1)
         pq = asyncio.PriorityQueue()
-        
-        def get_for_user_id(user_id: str, allowed_ids: Set[str]):
-            async def get_for_library(library_id):
+
+        async def get_for_user_id(user_id: str, allowed_ids: Set[str]):
+            async def get_for_library(library_id: str):
                 def parse_played_at(item) -> datetime:
                     raw_date = item.get("UserData", {}).get("LastPlayedDate", "")
-                    
                     try:
                         return datetime.fromisoformat(raw_date.replace("Z", "+00:00"))
                     except ValueError:
-                         return datetime(1970, 1, 1, tzinfo=timezone.utc)
-                
+                        return datetime(1970, 1, 1, tzinfo=timezone.utc)
+
                 nextup_items = (await self._get("/Shows/NextUp", {
                     "userId": user_id,
                     "parentId": library_id,
@@ -195,10 +182,9 @@ class Jellyfin(MediaPlayer):
 
                 for item in nextup_items:
                     temp = []
-                    series_id = item.get("SeriesId")
-                    if not series_id:
+                    if (series_id := item.get("SeriesId")) is None:
                         continue
-                    
+
                     lastPlayedAt = parse_played_at(item)
                     season = item.get("SeasonNumber", 1)
                     index = item.get("IndexNumber", 1) - 1
@@ -213,17 +199,18 @@ class Jellyfin(MediaPlayer):
                         "sortBy": "SeasonNumber,IndexNumber",
                         "sortOrder": "Ascending",
                     })).get("Items", [])
+
                     while episodes:
                         for ep in episodes:
                             if ep.get("UserData", {}).get("Played"):
                                 lastPlayedAt = max(parse_played_at(ep), lastPlayedAt)
                                 continue
-                            
+
                             temp.append({media.get("Path") for media in ep.get("MediaSources", []) if "Path" in media})
-                        
+
                         season += 1
                         index = 0
-                        
+
                         episodes = (await self._get(f"/Shows/{series_id}/Episodes", {
                             "userId": user_id,
                             "enableUserData": "true",
@@ -234,38 +221,35 @@ class Jellyfin(MediaPlayer):
                             "sortBy": "SeasonNumber,IndexNumber",
                             "sortOrder": "Ascending",
                         })).get("Items", [])
-                    
+
                     if lastPlayedAt < cutoff:
                         continue
-                    
+
                     if temp:
                         await pq.put((-lastPlayedAt.timestamp(), temp))
-                
-            return asyncio.gather(*(get_for_library(library_id) for library_id in allowed_ids))
+
+            asyncio.gather(*(get_for_library(library_id) for library_id in allowed_ids))
+
+        await asyncio.gather(*(get_for_user_id(user, lib_ids) for user, lib_ids in (await self._get_library_ids).items()))
         
-        async def process():
-            await asyncio.gather(*(get_for_user_id(user, lib_ids) for user, lib_ids in (await self._get_library_ids).items()))
+        result: List[List[Set[str]]] = []
+        processed: Set[str] = set()
+        while not pq.empty():
+            key, media_list = await pq.get()
+            temp: List[Set[str]] = []
+            for media in media_list:
+                m: Set[str] = set()
+                for path in media:
+                    if path in processed:
+                        continue
+                    processed.add(path)
+                    m.add(path)
+                temp.append(m)
             
-            result: List[List[Set[str]]] = []
-            processed: Set[str] = set()
-            while not pq.empty():
-                key, media_list = await pq.get()
-                temp: List[Set[str]] = []
-                for media in media_list:
-                    m: Set[str] = set()
-                    for path in media:
-                        if path in processed:
-                            continue
-                        processed.add(path)
-                        m.add(path)
-                    temp.append(m)
-                
-                result.append((key, temp))
-            
-            self.logger.info("[%s] Detected %d watching files in Jellyfin library", self, len(result))
-            return result
+            result.append((key, temp))
         
-        return asyncio.create_task(process())
+        self.logger.info("[%s] Detected %d watching files in Jellyfin library", self, len(result))
+        return result
 
     @property
     def type(self):

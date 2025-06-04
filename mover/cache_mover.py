@@ -161,7 +161,7 @@ async def move_to_source(mapping: MovingMapping) -> int:
     
     return total
 
-async def main(args, config: Config):
+async def main(config: Config):
     for mapping in config.mappings:
         try:            
             _, _, startingfree = shutil.disk_usage(mapping.source)
@@ -221,7 +221,7 @@ if __name__ == "__main__":
         sys.exit()
 
     try:
-        asyncio.run(main(args, config))
+        asyncio.run(main(config))
     finally:
         lock_file.close()
         os.remove(lock_file.name)
