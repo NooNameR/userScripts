@@ -85,7 +85,7 @@ class Plex(MediaPlayer):
                     watched_counts[path] += 1 if watched else 0
                     not_watched += 0 if watched else 1
             
-            self.logger.info("[%s] Found %d not-watched files in the Jellyfin library", self, not_watched)
+            self.logger.info("[%s] Found %d not-watched files in the Plex library", self, not_watched)
             return watched_counts
                                     
         return asyncio.create_task(process())
@@ -139,7 +139,7 @@ class Plex(MediaPlayer):
             self.__continue_watching_on_source
         )
         
-        return (path in continue_watching, watched.get(path, 0))
+        return (path in continue_watching, len(self.__plex_servers) - watched.get(path, 0))
     
     async def continue_watching(self, pq: asyncio.Queue[Tuple[float, int, str]]) -> None:
         max_count: int = 25

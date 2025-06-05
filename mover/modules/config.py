@@ -9,7 +9,7 @@ from .media.jellyfin import Jellyfin
 from .media.media_player import MediaPlayer
 from .seeding.qbit import Qbit
 from .seeding.seeding_client import SeedingClient
-from .helpers import get_ctime, get_stat
+from .helpers import get_ctime, get_stat, format_bytes_to_gib, get_age_str
 from datetime import datetime, timedelta
 from typing import Dict, Tuple, Set, List
 from functools import cached_property
@@ -94,7 +94,7 @@ class MovingMapping:
         return 0
     
     @cached_property
-    def eligible_for_source(self) -> asyncio.Future[List[str]]:
+    def eligible_for_source(self) -> asyncio.Future[List[Tuple[str, Dict[str, str]]]]:
         pq: asyncio.PriorityQueue[Tuple[float, int, str]] = asyncio.PriorityQueue()
         seen: Set[str] = set()
         result: List[str] = []
@@ -104,12 +104,15 @@ class MovingMapping:
             await tasks
             
             while not pq.empty():
-                _, _, path = await pq.get()
+                last_watched, _, path = await pq.get()
                 
                 if path in seen:
                     continue
                 
-                result.append(path)
+                metadata: Dict[str, str] = {
+                    "last_watched_at": str(datetime.fromtimestamp(-last_watched))
+                }
+                result.append((path, metadata))
                 seen.add(path)
             
             return result
@@ -127,13 +130,10 @@ class MovingMapping:
     def pause(self, path: str) -> asyncio.Future:
         return asyncio.gather(*(qbit.pause(path) for qbit in self.clients))
             
-    def resume(self) -> asyncio.Future:
-        return asyncio.gather(*(qbit.resume() for qbit in self.clients))
-            
-    async def get_sort_key(self, path: str) -> Tuple[int, int, int, int, int, int, float]:
+    async def get_sort_key(self, path: str) -> Tuple[Tuple[int, int, int, int, int, int, float], Dict[str, str]]:
         # ignored path, no point checking
         if self.is_ignored(path):
-            return (1, 0, 0, 0, 0, 0, 0)
+            return ((1, 0, 0, 0, 0, 0, 0), {})
         
         qbit_results: List[Tuple[int, int]]
         media_results: List[Tuple[bool, int]]
@@ -147,22 +147,33 @@ class MovingMapping:
             ((min(a for a, _ in res), min(n for _, n in res)) for res in qbit_results if res),
             default=(0, 0)
         )
-        continue_watching, watched_left = int(any(cw for cw, _ in media_results)), min((wc for _, wc  in media_results), default=0)
+        continue_watching, watched_left = any(cw for cw, _ in media_results), min((wc for _, wc  in media_results), default=0)
         
         has_torrent = 1 if qbit_results else 0
         size = get_stat(path).st_size
         
-        return (
-            # age_priority,       # 1. age_priority (0 if within age range, else 1)
-            continue_watching,  # 2. media un-watched -> 1, watched 0
-            watched_left,       # 3. how many users left to watch
-            has_torrent,        # 4. has_torrent (0 if has torrents, else 1)
-            -completion_age,    # 5. -completion_age (negative to prioritize older completion age)
-            -num_seeders,       # 6. -num_seeders (negative to prioritize more seeders)
-            len(qbit_results),  # 7. num seeding torrents
-            -size,              # 8. bigger file goes first
-            get_ctime(path)     # 9. ctime (file creation time as tiebreaker)
-        )
+        metadata: Dict[str, str] = {
+            "continue_watching": str(continue_watching),
+            "users_left_to_watch": str(watched_left),
+            "has_torrent": str(has_torrent),
+            "completion_age": f"{timedelta(seconds=completion_age).days}d",
+            "num_seeders": str(num_seeders),
+            "num_torrents": str(len(qbit_results)),
+            "size": str(format_bytes_to_gib(size)),
+            "age": get_age_str(path)
+        }
+        
+        return ((
+            # age_priority,             # 1. age_priority (0 if within age range, else 1)
+            int(continue_watching), # 2. media un-watched -> 1, watched 0
+            watched_left,           # 3. how many users left to watch
+            has_torrent,            # 4. has_torrent (0 if has torrents, else 1)
+            -completion_age,        # 5. -completion_age (negative to prioritize older completion age)
+            -num_seeders,           # 6. -num_seeders (negative to prioritize more seeders)
+            len(qbit_results),      # 7. num seeding torrents
+            -size,                  # 8. bigger file goes first
+            get_ctime(path)         # 9. ctime (file creation time as tiebreaker)
+        ), metadata)
         
     def within_age_range(self, path: float):
         age = self.now.timestamp() - get_ctime(path)

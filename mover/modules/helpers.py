@@ -58,7 +58,7 @@ def is_same_file(src_file: str, dest_file: str) -> bool:
     dest_stat = get_stat(dest_file)
     return src_stat.st_size == dest_stat.st_size
 
-def copy_file_with_metadata(src_file: str, dest_file: str) -> None:
+def copy_file_with_metadata(src_file: str, dest_file: str, metadata: Dict[str, str] = {}) -> None:
     maybe_create_dir(src_file, dest_file)
     
     def copy():
@@ -67,7 +67,7 @@ def copy_file_with_metadata(src_file: str, dest_file: str) -> None:
         os.chown(dest_file, src_stat.st_uid, src_stat.st_gid)
     
     try:
-        logging.info("[%s] Copying: %s -> %s", get_age_str(src_file), src_file, dest_file)
+        logging.info("[%s] Copying: %s -> %s | Metadata: %s", get_age_str(src_file), src_file, dest_file, metadata)
         execute(copy)
         logging.info("Copied: %s -> %s", src_file, dest_file)
     except PermissionError as e:

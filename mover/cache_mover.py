@@ -7,16 +7,16 @@ import asyncio
 import modules.helpers as helpers
 from logging.handlers import RotatingFileHandler
 from datetime import datetime
-from typing import Callable, Dict, Set, Iterable, List
+from typing import Callable, Dict, Set, Iterable, List, Tuple
 from collections import defaultdict
 from modules.config import Config, MovingMapping
 from asyncio import PriorityQueue
 
-async def move_files(mapping: MovingMapping, files: Iterable[str], inodes: Dict[int, Set[str]], dest_func: Callable[[str], str], remaining: int) -> int:
+async def move_files(mapping: MovingMapping, files: Iterable[Tuple[str, Dict[str, str]]], inodes: Dict[int, Set[str]], dest_func: Callable[[str], str], remaining: int) -> int:
     total: int = 0
     processed: Set[str] = set()
     
-    for src_file in files:
+    for src_file, metadata in files:
         if src_file in processed:
             logging.debug("File was already processed: %s", src_file)
             continue
@@ -43,9 +43,9 @@ async def move_files(mapping: MovingMapping, files: Iterable[str], inodes: Dict[
         dest_file = dest_func(src_file)
         # Skip if the file already exists in the destination with the same size
         if helpers.is_same_file(src_file, dest_file):
-            logging.info("Skipping existing file: %s", dest_file)
+            logging.info("Skipping existing file: %s | Metadata: %s", dest_file, metadata)
         else:
-            helpers.copy_file_with_metadata(src_file, dest_file)
+            helpers.copy_file_with_metadata(src_file, dest_file, metadata)
         
         processed.add(src_file)
         
@@ -90,8 +90,8 @@ async def move_to_destination(mapping: MovingMapping) -> int:
     
     async def enqueue_with_key(src_file):
         async with sem:
-            key = await mapping.get_sort_key(src_file)
-            await pq.put((key, src_file))
+            key, metadata = await mapping.get_sort_key(src_file)
+            await pq.put((key, (src_file, metadata)))
     
     for root, dirs, files in os.walk(mapping.source):
         dirs.sort()
@@ -129,13 +129,13 @@ async def move_to_source(mapping: MovingMapping) -> int:
     if not can_move:
         return 0
     
-    files_to_move: List[str] = await mapping.eligible_for_source
+    files_to_move: List[Tuple[str, Dict[str, str]]] = await mapping.eligible_for_source
     if not files_to_move:
         return 0
     
     logging.info("Scanning %s...", mapping.destination)
     
-    inodes_map: Dict[int, Set[str]] = {helpers.get_stat(f).st_ino: set() for f in files_to_move}
+    inodes_map: Dict[int, Set[str]] = {helpers.get_stat(f).st_ino: set() for f, _ in files_to_move}
     for root, dirs, files in os.walk(mapping.destination):
         dirs.sort()
 

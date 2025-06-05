@@ -154,8 +154,8 @@ class Jellyfin(MediaPlayer):
         return False
     
     async def get_sort_key(self, path: str) -> Tuple[bool, int]:
-        users = await self._get_users
-        watched, continue_watching = await asyncio.gather(
+        users, watched, continue_watching = await asyncio.gather(
+            self._get_users,
             self.media,
             self.__continue_watching_on_source
         )
