@@ -5,7 +5,8 @@ import asyncio
 import threading
 from .media_player import MediaPlayer, MediaPlayerType
 from ..rewriter import Rewriter
-from typing import Set, List, Tuple
+from collections import defaultdict
+from typing import Set, List, Tuple, Dict
 from datetime import datetime, timedelta
 from functools import cached_property
 
@@ -41,42 +42,51 @@ class Plex(MediaPlayer):
         return PlexServer(self.url, token)
     
     @cached_property
-    def not_watched_media(self) -> asyncio.Task[Set[str]]:
-        queue = asyncio.Queue()
-        
-        async def __populate(item):
-            for media in item.media:
-                for part in media.parts:
-                    path = self.rewriter.on_source(part.file)
-                    if os.path.exists(path):
-                        self.logger.debug("[%s] Non-Watched %s: %s (%s)", self, item.type, item.title, path)
-                        await queue.put(path)
-                        
-        async def process_section(section):
-            for item in await asyncio.to_thread(section.search, unwatched=True):
-                if item.type == 'movie':
-                    await __populate(item)
-                elif item.type == 'show':
-                    for episode in item.episodes():
-                        await __populate(episode)
-        
-        def process_server(server):
-            return asyncio.gather(*(
+    def media(self) -> asyncio.Task[Dict[str, int]]:        
+        async def process_server(server):
+            lock = asyncio.Lock()
+            server_map: Dict[str, bool] = {}
+            
+            async def __populate(item):
+                for media in item.media:
+                    for part in media.parts:
+                        path = self.rewriter.on_source(part.file)
+                        if os.path.exists(path):
+                            self.logger.debug("[%s] Processing %s: %s (%s)", self, item.type, item.title, path)
+                            
+                            async with lock:
+                                server_map[path] = item.isWatched or server_map.get(path, False)
+                            
+            async def process_section(section):
+                for item in await asyncio.to_thread(section.search):
+                    if item.type == 'movie':
+                        await __populate(item)
+                    elif item.type == 'show':
+                        for episode in item.episodes():
+                            await __populate(episode)
+            
+            await asyncio.gather(*(
                 process_section(section)
                 for section in server.library.sections() 
                 if section.type in {'movie', 'show'}
                 if not self.libraries or (section.title in self.libraries)
             ))
+            
+            return server_map
         
         async def process():
-            await asyncio.gather(*(process_server(server) for server in self.__plex_servers))
-            not_watched = set()
+            user_results = await asyncio.gather(*(process_server(server) for server in self.__plex_servers))
             
-            while not queue.empty():
-                not_watched.add(await queue.get())
-                
-            self.logger.info("[%s] Found %d not-watched files in the Plex library", self, len(not_watched))
-            return not_watched
+            watched_counts: Dict[str, int] = defaultdict(int)
+            not_watched = 0
+            
+            for user_result in user_results:
+                for path, watched in user_result.items():
+                    watched_counts[path] += 1 if watched else 0
+                    not_watched += 0 if watched else 1
+            
+            self.logger.info("[%s] Found %d not-watched files in the Jellyfin library", self, not_watched)
+            return watched_counts
                                     
         return asyncio.create_task(process())
     
@@ -123,13 +133,13 @@ class Plex(MediaPlayer):
         
         return asyncio.create_task(process())
         
-    async def get_sort_key(self, path: str) -> int:
-        not_watched, continue_watching = await asyncio.gather(
-            self.not_watched_media,
+    async def get_sort_key(self, path: str) -> Tuple[bool, int]:
+        watched, continue_watching = await asyncio.gather(
+            self.media,
             self.__continue_watching_on_source
         )
         
-        return (1 if path in not_watched else 0) + (1 if path in continue_watching else 0)
+        return (path in continue_watching, watched.get(path, 0))
     
     async def continue_watching(self, pq: asyncio.Queue[Tuple[float, int, str]]) -> None:
         max_count: int = 25

@@ -3,7 +3,8 @@ import httpx
 import asyncio
 import logging
 import threading
-from typing import Set, List, Tuple
+from typing import Set, List, Tuple, Dict
+from collections import defaultdict
 from datetime import timedelta, datetime, timezone
 from .media_player import MediaPlayer, MediaPlayerType
 from ..rewriter import Rewriter
@@ -18,6 +19,7 @@ class Jellyfin(MediaPlayer):
         self.libraries = set(libraries)
         self.users = set(users)
         self._lock = threading.Lock()
+        self._initialized: bool = False
         self.logger = logging.getLogger(__name__)
 
     @cached_property 
@@ -25,6 +27,7 @@ class Jellyfin(MediaPlayer):
         with self._lock:
             logging.getLogger("httpx").setLevel(logging.WARNING)
             
+            self._initialized = True
             return httpx.AsyncClient(
                 base_url=self.url, 
                 headers={
@@ -72,40 +75,69 @@ class Jellyfin(MediaPlayer):
         return asyncio.create_task(process())
         
     @cached_property
-    def not_watched_media(self) -> Set[str]:
-        async def get_for_user_id(user_id: str, allowed_ids: Set[str]) -> List[str]:
-            async def get_for_library(library_id: str) -> List[str]:
-                found: Set[str] = set()
+    def media(self) -> asyncio.Task[Dict[str, int]]:
+        async def get_for_user_id(user_id: str, allowed_ids: Set[str]) -> Dict[str, bool]:
+            lock = asyncio.Lock()
+            user_state: Dict[str, bool] = {}
+            
+            async def get_for_library(library_id: str) -> None:
                 params = {
-                    "Filters": "IsUnplayed",
                     "IncludeItemTypes": ["Episode", "Movie", "Video"],
                     "ParentId": library_id,
                     "UserId": user_id,
                     "IsMissing": False,
                     "Fields": "MediaSources",
                     "Recursive": True,
+                    "SortBy": "IndexNumber",
+                    "SortOrder": "Ascending",
+                    "EnableUserData": True,
+                    "Limit": 500
                 }
-                result = await self._get("/Items", params)
-                for item in result.get("Items", []):
-                    for media in item.get("MediaSources", []):
-                        path = media.get("Path")
-                        if path:
+                start_index = 0
+                
+                while True:
+                    params["StartIndex"] = start_index
+                    
+                    result = await self._get("/Items", params)
+                    items = result.get("Items", [])
+                    
+                    if not items:
+                        break
+                    
+                    for item in items:
+                        for media in item.get("MediaSources", []):
+                            path = media.get("Path")
+                            if not path:
+                                continue
+                                
                             local_path = self.rewriter.on_source(path)
                             if os.path.exists(local_path):
-                                self.logger.debug("Unwatched %s: %s (%s)", item.get("Type"), item.get("Name"), local_path)
-                                found.add(local_path)
-                return found
-
-            results = await asyncio.gather(*(get_for_library(lib_id) for lib_id in allowed_ids))
-            return {p for sub in results for p in sub}
+                                self.logger.debug("Processing %s: %s (%s)", item.get("Type"), item.get("Name"), local_path)
+                                
+                                async with lock:
+                                    user_state[local_path] = item.get("UserData", {}).get("Played", False) or user_state.get(local_path, False)
+                    
+                    start_index += len(items)
+            
+            await asyncio.gather(*(get_for_library(lib_id) for lib_id in allowed_ids))
+            
+            return user_state
 
         async def process():
+            lib_ids = await self._get_library_ids
             user_results = await asyncio.gather(
-                *(get_for_user_id(user, lib_ids) for user, lib_ids in (await self._get_library_ids).items())
+                *(get_for_user_id(user, lib_ids) for user, lib_ids in lib_ids.items())
             )
-            not_watched = {p for paths in user_results for p in paths}
-            self.logger.info("[%s] Found %d not-watched files in the Jellyfin library", self, len(not_watched))
-            return not_watched
+            
+            watched_counts: Dict[str, int] = defaultdict(int)
+            not_watched = 0
+            for user_result in user_results:
+                for path, watched in user_result.items():
+                    watched_counts[path] += 1 if watched else 0
+                    not_watched += 0 if watched else 1
+            
+            self.logger.info("[%s] Found %d not-watched files in the Jellyfin library", self, not_watched)
+            return watched_counts
 
         return asyncio.create_task(process())
 
@@ -121,13 +153,14 @@ class Jellyfin(MediaPlayer):
                             return True
         return False
     
-    async def get_sort_key(self, path: str) -> int:
-        not_watched, continue_watching = await asyncio.gather(
-            self.not_watched_media,
+    async def get_sort_key(self, path: str) -> Tuple[bool, int]:
+        users = await self._get_users
+        watched, continue_watching = await asyncio.gather(
+            self.media,
             self.__continue_watching_on_source
         )
         
-        return (1 if path in not_watched else 0) + (1 if path in continue_watching else 0)
+        return (path in continue_watching, len(users) - watched.get(path, 0))
     
     async def continue_watching(self, pq: asyncio.Queue[Tuple[float, int, str]]) -> None:
         total: int = 0
@@ -269,4 +302,8 @@ class Jellyfin(MediaPlayer):
         return str(self)
 
     async def aclose(self):
+        with self._lock:
+            if not self._initialized:
+                return
+        
         await self._client.aclose()

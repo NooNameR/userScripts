@@ -17,7 +17,7 @@ class MediaPlayer(ABC):
         pass
     
     @abstractmethod
-    async def get_sort_key(self, path: str) -> int:
+    async def get_sort_key(self, path: str) -> Tuple[bool, int]:
         pass
     
     @abstractmethod
