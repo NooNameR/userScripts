@@ -76,15 +76,14 @@ class Jellyfin(MediaPlayer):
         
     @cached_property
     def media(self) -> asyncio.Task[Dict[str, int]]:
-        async def get_for_user_id(user_id: str, allowed_ids: Set[str]) -> Dict[str, bool]:
-            lock = asyncio.Lock()
-            user_state: Dict[str, bool] = {}
-            
+        async def get_for_user_id(user_id: str, allowed_ids: Set[str]) -> Set[str]:
             async def get_for_library(library_id: str) -> None:
+                local_state: Set[str] = set()
                 params = {
                     "IncludeItemTypes": ["Episode", "Movie", "Video"],
                     "ParentId": library_id,
                     "UserId": user_id,
+                    "Filters": "IsUnplayed",
                     "IsMissing": False,
                     "Fields": "MediaSources",
                     "Recursive": True,
@@ -113,31 +112,25 @@ class Jellyfin(MediaPlayer):
                             local_path = self.rewriter.on_source(path)
                             if os.path.exists(local_path):
                                 self.logger.debug("Processing %s: %s (%s)", item.get("Type"), item.get("Name"), local_path)
-                                
-                                async with lock:
-                                    user_state[local_path] = item.get("UserData", {}).get("Played", False) or user_state.get(local_path, False)
+                                local_state.add(local_path)
                     
                     start_index += len(items)
+                return local_state
             
-            await asyncio.gather(*(get_for_library(lib_id) for lib_id in allowed_ids))
-            
-            return user_state
+            local_states = await asyncio.gather(*(get_for_library(lib_id) for lib_id in allowed_ids))
+            return {p for lib in local_states for p in lib}
 
         async def process():
             lib_ids = await self._get_library_ids
-            user_results = await asyncio.gather(
-                *(get_for_user_id(user, lib_ids) for user, lib_ids in lib_ids.items())
-            )
+            user_results = [get_for_user_id(user, lib_ids) for user, lib_ids in lib_ids.items()]
             
-            watched_counts: Dict[str, int] = defaultdict(int)
-            not_watched = 0
-            for user_result in user_results:
-                for path, watched in user_result.items():
-                    watched_counts[path] += 1 if watched else 0
-                    not_watched += 0 if watched else 1
+            un_watched_counts: Dict[str, int] = defaultdict(int)
+            for user_result in asyncio.as_completed(user_results):
+                for path in await user_result:
+                    un_watched_counts[path] += 1
             
-            self.logger.info("[%s] Found %d not-watched files in the Jellyfin library", self, not_watched)
-            return watched_counts
+            self.logger.info("[%s] Found %d not-watched files in the Jellyfin library", self, len(un_watched_counts))
+            return un_watched_counts
 
         return asyncio.create_task(process())
 
@@ -154,13 +147,12 @@ class Jellyfin(MediaPlayer):
         return False
     
     async def get_sort_key(self, path: str) -> Tuple[bool, int]:
-        users, watched, continue_watching = await asyncio.gather(
-            self._get_users,
+        un_watched, continue_watching = await asyncio.gather(
             self.media,
             self.__continue_watching_on_source
         )
         
-        return (path in continue_watching, len(users) - watched.get(path, 0))
+        return (path in continue_watching, un_watched.get(path, 0))
     
     async def continue_watching(self, pq: asyncio.Queue[Tuple[float, int, str]]) -> None:
         total: int = 0

@@ -147,7 +147,7 @@ class MovingMapping:
             ((min(a for a, _ in res), min(n for _, n in res)) for res in qbit_results if res),
             default=(0, 0)
         )
-        continue_watching, watched_left = any(cw for cw, _ in media_results), min((wc for _, wc  in media_results), default=0)
+        continue_watching, watched_left = any(cw for cw, _ in media_results), sum(wc for _, wc  in media_results)
         
         has_torrent = 1 if qbit_results else 0
         size = get_stat(path).st_size
@@ -155,10 +155,9 @@ class MovingMapping:
         metadata: Dict[str, str] = {
             "continue_watching": str(continue_watching),
             "users_left_to_watch": str(watched_left),
-            "has_torrent": str(has_torrent),
+            "num_torrents": str(len(qbit_results)),
             "completion_age": f"{timedelta(seconds=completion_age).days}d",
             "num_seeders": str(num_seeders),
-            "num_torrents": str(len(qbit_results)),
             "size": str(format_bytes_to_gib(size)),
             "age": get_age_str(path)
         }
