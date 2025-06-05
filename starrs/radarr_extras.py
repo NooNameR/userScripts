@@ -5,9 +5,11 @@ import sys
 import json
 import urllib.request
 from urllib.error import URLError, HTTPError
+import urllib.parse
 import logging
 import time
-from typing import List
+import base64
+from typing import List, Callable, Tuple
 from logging.handlers import RotatingFileHandler
 
 script_name = "Radarr-Trailer"
@@ -42,10 +44,14 @@ movie_path = os.getenv("radarr_movie_path")
 tmdb_api_key = os.getenv("TMDB_API_KEY")
 language = os.getenv("EXTRA_LANGUAGE") or "en-US"
 proxy = os.getenv("PROXY")
+autopulse_instance_name = os.getenv("AUTOPULSE_INSTANCE_NAME") or "manual"
+autopulse_username = os.getenv("AUTOPULSE_USERNAME")
+autopulse_password = os.getenv("AUTOPULSE_PASSWORD")
 
-def http_get(url):
+def http_get(url, headers={}):
+    req = urllib.request.Request(url, headers=headers, method="GET")
     try:
-        with urllib.request.urlopen(url) as response:
+        with urllib.request.urlopen(req) as response:
             return response.getcode(), response.read().decode(encoding)
     except HTTPError as e:
         logger.error("HTTP error fetching %s - %d %s", url, e.code, e.reason)
@@ -111,22 +117,30 @@ def http_post(url, data, headers=None):
         logger.error("Request failed for %s - %s", url, e)
         return None, None
     
-def try_link(dirs: List[str], youtube_id: str, retries: int=1, delay: int=0):
+def try_link(dirs: List[Tuple[str, Callable[[str], str]]], youtube_id: str, retries: int=1, delay: int=0):
     file = check_download_status(youtube_id, retries, delay)
     if not file:
         return False
     
-    linked = False
-    for dir in dirs:
-        dst = os.path.join(dir, os.path.basename(file))
-        if not os.path.exists(dst):
-            linked = True
-            logger.info("Linking: %s to %s", file, dst)
-            os.link(file, dst)
-    
-    if not linked:
-        logger.info("Skipping file: %s, already exists", dst)
+    for (dir, suplier) in dirs:
+        dst = os.path.join(dir, suplier(os.path.basename(file)))
+        if os.path.exists(dst):
+            os.remove(dst)
+            
+        logger.info("Linking: %s to %s", file, dst)
+        os.link(file, dst)
+        
+        logger.info("Linking: %s to %s", file, dst)
+        params = urllib.parse.urlencode({"path": dst})
+        status_code, body = http_get(f"http://autopulse:2875/triggers/{autopulse_instance_name}?{params}", autopulse_credentials())
+        logger.info("%s - Autopulse - response: %s", status_code, body)
+        
     return True
+
+def autopulse_credentials():
+    credentials = f"{autopulse_username}:{autopulse_password}"
+    encoded_credentials = base64.b64encode(credentials.encode(encoding)).decode(encoding)
+    return {"Authorization": f"Basic {encoded_credentials}"}
 
 def main():
     if event_type == "Test":
@@ -168,13 +182,17 @@ def main():
             cookies_str = file.read()
     
     # to be able to match for Jellyfin and Plex
-    trailer_dirs = [os.path.join(movie_path, "Trailers")]
+    trailer_dirs = [
+        (os.path.join(movie_path, "Trailers"), lambda file: file),
+        # Jellyfin?
+        (os.path.join(movie_path, "extras"), lambda file: "trailer" + os.path.splitext(file)[1])
+    ]
     
     for trailer in trailers:
         trailer_key = trailer.get("key")
         trailer_title = trailer.get("name")
         
-        for dir_ in trailer_dirs:
+        for dir_, _ in trailer_dirs:
             os.makedirs(dir_, exist_ok=True)
             
         if try_link(trailer_dirs, trailer_key):
