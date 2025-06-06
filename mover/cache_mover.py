@@ -4,7 +4,6 @@ import shutil
 import sys
 import logging
 import asyncio
-import signal
 import modules.helpers as helpers
 from logging.handlers import RotatingFileHandler
 from datetime import datetime
@@ -82,7 +81,7 @@ async def move_to_destination(mapping: MovingMapping) -> int:
         logging.debug("Stopping mover, source: %s is below the threshold", mapping.source)
         return 0
     
-    pq = PriorityQueue()
+    pq: PriorityQueue[Tuple[float, Tuple[str, Dict[str, str]]]] = PriorityQueue()
     tasks = []
     inodes_map: Dict[int, Set[str]] = defaultdict(set)
     logging.info("Scanning %s...", mapping.source)
@@ -180,32 +179,6 @@ async def main(config: Config):
         finally:
             await asyncio.shield(mapping.aclose())
             
-def run_with_signals(config: Config):
-    loop = asyncio.new_event_loop()
-    asyncio.set_event_loop(loop)
-
-    stop_event = asyncio.Event()
-
-    async def shutdown():
-        logging.warning("Shutdown signal received. Cancelling all tasks...")
-        stop_event.set()
-        tasks = [t for t in asyncio.all_tasks() if t is not asyncio.current_task()]
-        [t.cancel() for t in tasks]
-        await asyncio.gather(*tasks, return_exceptions=True)
-
-    for sig in (signal.SIGINT, signal.SIGTERM):
-        loop.add_signal_handler(sig, lambda: asyncio.create_task(shutdown()))
-
-    try:
-        loop.run_until_complete(main(config))
-    except asyncio.CancelledError:
-        logging.warning("Main coroutine was cancelled")
-    except Exception as e:
-        logging.error("Unexpected error: %s", e, exc_info=True)
-    finally:
-        loop.run_until_complete(loop.shutdown_asyncgens())
-        loop.close()
-                
 if __name__ == "__main__":
     import argparse
     # Argument parsing
@@ -248,7 +221,7 @@ if __name__ == "__main__":
         sys.exit()
 
     try:
-        run_with_signals(config)
+         asyncio.run(main(config))
     finally:
         lock_file.close()
         os.remove(lock_file.name)
