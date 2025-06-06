@@ -4,6 +4,7 @@ import shutil
 import sys
 import logging
 import asyncio
+import signal
 import modules.helpers as helpers
 from logging.handlers import RotatingFileHandler
 from datetime import datetime
@@ -177,7 +178,33 @@ async def main(config: Config):
         except Exception as e:
             logging.error("Error: %s", e, exc_info=True)
         finally:
-            await mapping.aclose()
+            await asyncio.shield(mapping.aclose())
+            
+def run_with_signals(config: Config):
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+
+    stop_event = asyncio.Event()
+
+    async def shutdown():
+        logging.warning("Shutdown signal received. Cancelling all tasks...")
+        stop_event.set()
+        tasks = [t for t in asyncio.all_tasks() if t is not asyncio.current_task()]
+        [t.cancel() for t in tasks]
+        await asyncio.gather(*tasks, return_exceptions=True)
+
+    for sig in (signal.SIGINT, signal.SIGTERM):
+        loop.add_signal_handler(sig, lambda: asyncio.create_task(shutdown()))
+
+    try:
+        loop.run_until_complete(main(config))
+    except asyncio.CancelledError:
+        logging.warning("Main coroutine was cancelled")
+    except Exception as e:
+        logging.error("Unexpected error: %s", e, exc_info=True)
+    finally:
+        loop.run_until_complete(loop.shutdown_asyncgens())
+        loop.close()
                 
 if __name__ == "__main__":
     import argparse
@@ -221,7 +248,8 @@ if __name__ == "__main__":
         sys.exit()
 
     try:
-        asyncio.run(main(config))
+        run_with_signals(config)
     finally:
         lock_file.close()
         os.remove(lock_file.name)
+        logging.error("Lock file: %s was removed.", lock_file.name)
