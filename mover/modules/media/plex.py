@@ -5,6 +5,7 @@ import asyncio
 import threading
 from .media_player import MediaPlayer, MediaPlayerType
 from ..rewriter import Rewriter
+from ..helpers import get_stat
 from collections import defaultdict
 from typing import Set, List, Tuple, Dict
 from datetime import datetime, timedelta
@@ -42,10 +43,10 @@ class Plex(MediaPlayer):
         return PlexServer(self.url, token)
     
     @cached_property
-    def media(self) -> asyncio.Task[Set[str]]:        
+    def media(self) -> asyncio.Task[Dict[int, int]]:        
         async def process_server(server):      
             def process_section(section):
-                local_state: Set[str] = set()
+                local_state: Set[int] = set()
                 
                 def __populate(item):
                     for media in item.media:
@@ -53,7 +54,7 @@ class Plex(MediaPlayer):
                             path = self.rewriter.on_source(part.file)
                             if os.path.exists(path):
                                 self.logger.debug("[%s] Processing %s: %s (%s)", self, item.type, item.title, path)
-                                local_state.add(path)
+                                local_state.add(get_stat(path).st_ino)
                                 
                 for item in section.search(unwatched=True):
                     if item.type == 'movie':
@@ -76,7 +77,7 @@ class Plex(MediaPlayer):
         async def process():
             user_results = [process_server(server) for server in self.__plex_servers]
             
-            un_watched_counts: Dict[str, int] = defaultdict(int)
+            un_watched_counts: Dict[int, int] = defaultdict(int)
             
             for user_result in asyncio.as_completed(user_results):
                 for path in await user_result:
@@ -121,7 +122,7 @@ class Plex(MediaPlayer):
     def __continue_watching_on_source(self) -> asyncio.Task[Set[str]]:
         async def process():
             return {
-                self.rewriter.on_source(path)
+                get_stat(self.rewriter.on_source(path)).st_ino
                 for _, bucket in await self.__continue_watching
                 for media in bucket
                 for path in media
@@ -131,12 +132,13 @@ class Plex(MediaPlayer):
         return asyncio.create_task(process())
         
     async def get_sort_key(self, path: str) -> Tuple[bool, int]:
+        inode = get_stat(path)
         un_watched, continue_watching = await asyncio.gather(
             self.media,
             self.__continue_watching_on_source
         )
         
-        return (path in continue_watching, un_watched.get(path, 0))
+        return (inode in continue_watching, un_watched.get(inode, 0))
     
     async def continue_watching(self, pq: asyncio.Queue[Tuple[float, int, str]]) -> None:
         max_count: int = 25
@@ -152,7 +154,7 @@ class Plex(MediaPlayer):
                 
                 for index, path in enumerate(item):
                     source_path = self.rewriter.on_source(path)
-                    if source_path in await self.__continue_watching_on_source:
+                    if os.path.exists(source_path):
                         continue
                     
                     detination_path = self.rewriter.on_destination(path)

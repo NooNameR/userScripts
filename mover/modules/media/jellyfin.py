@@ -8,6 +8,7 @@ from collections import defaultdict
 from datetime import timedelta, datetime, timezone
 from .media_player import MediaPlayer, MediaPlayerType
 from ..rewriter import Rewriter
+from ..helpers import get_stat
 from functools import cached_property
 
 class Jellyfin(MediaPlayer):
@@ -75,10 +76,10 @@ class Jellyfin(MediaPlayer):
         return asyncio.create_task(process())
         
     @cached_property
-    def media(self) -> asyncio.Task[Dict[str, int]]:
-        async def get_for_user_id(user_id: str, allowed_ids: Set[str]) -> Set[str]:
+    def media(self) -> asyncio.Task[Dict[int, int]]:
+        async def get_for_user_id(user_id: str, allowed_ids: Set[str]) -> Set[int]:
             async def get_for_library(library_id: str) -> None:
-                local_state: Set[str] = set()
+                local_state: Set[int] = set()
                 params = {
                     "IncludeItemTypes": ["Episode", "Movie", "Video"],
                     "ParentId": library_id,
@@ -112,7 +113,7 @@ class Jellyfin(MediaPlayer):
                             local_path = self.rewriter.on_source(path)
                             if os.path.exists(local_path):
                                 self.logger.debug("Processing %s: %s (%s)", item.get("Type"), item.get("Name"), local_path)
-                                local_state.add(local_path)
+                                local_state.add(get_stat(local_path).st_ino)
                     
                     start_index += len(items)
                 return local_state
@@ -124,7 +125,7 @@ class Jellyfin(MediaPlayer):
             lib_ids = await self._get_library_ids
             user_results = [get_for_user_id(user, lib_ids) for user, lib_ids in lib_ids.items()]
             
-            un_watched_counts: Dict[str, int] = defaultdict(int)
+            un_watched_counts: Dict[int, int] = defaultdict(int)
             for user_result in asyncio.as_completed(user_results):
                 for path in await user_result:
                     un_watched_counts[path] += 1
@@ -147,17 +148,17 @@ class Jellyfin(MediaPlayer):
         return False
     
     async def get_sort_key(self, path: str) -> Tuple[bool, int]:
+        inode = get_stat(path).st_ino
         un_watched, continue_watching = await asyncio.gather(
             self.media,
             self.__continue_watching_on_source
         )
         
-        return (path in continue_watching, un_watched.get(path, 0))
+        return (inode in continue_watching, un_watched.get(inode, 0))
     
     async def continue_watching(self, pq: asyncio.Queue[Tuple[float, int, str]]) -> None:
         total: int = 0
         max_count: int = 25
-        on_source = await self.__continue_watching_on_source
         
         for key, bucket in await self.__continue_watching:
             remaining = max_count
@@ -169,7 +170,7 @@ class Jellyfin(MediaPlayer):
                 
                 for index, path in enumerate(item):
                     source_path = self.rewriter.on_source(path)
-                    if source_path in on_source:
+                    if os.path.exists(source_path):
                         continue
                     
                     detination_path = self.rewriter.on_destination(path)
@@ -181,10 +182,10 @@ class Jellyfin(MediaPlayer):
         self.logger.info("[%s] Detected %d watching files not currently available on source drives in Jellyfin library", self, total)
     
     @cached_property
-    def __continue_watching_on_source(self) -> asyncio.Task[Set[str]]:
+    def __continue_watching_on_source(self) -> asyncio.Task[Set[int]]:
         async def process():
             return {
-                self.rewriter.on_source(path)
+                get_stat(self.rewriter.on_source(path)).st_ino
                 for _, bucket in await self.__continue_watching
                 for media in bucket
                 for path in media
@@ -194,7 +195,7 @@ class Jellyfin(MediaPlayer):
         return asyncio.create_task(process())
 
     @cached_property
-    def __continue_watching(self) -> asyncio.Task[List[Tuple[float,List[Set[str]]]]]:
+    def __continue_watching(self) -> asyncio.Task[List[Tuple[float, List[Set[str]]]]]:
         cutoff = self.now - timedelta(weeks=1)
         pq: asyncio.Queue[Tuple[float, List[str]]] = asyncio.PriorityQueue()
         
