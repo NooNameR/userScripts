@@ -96,6 +96,8 @@ class Plex(MediaPlayer):
                     if not part.file:
                         continue
                     path = self.rewriter.on_source(part.file)
+                    if not os.path.exists(path):
+                        path = self.rewriter.on_destination(part.file)
                     if os.path.exists(path) and os.path.samefile(path, file):
                         return True
             return False
