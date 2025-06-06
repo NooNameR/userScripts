@@ -85,7 +85,7 @@ class Jellyfin(MediaPlayer):
                     "UserId": user_id,
                     "Filters": "IsUnplayed",
                     "IsMissing": False,
-                    "Fields": "MediaSources",
+                    "Fields": "MediaSources,MediaStreams",
                     "Recursive": True,
                     "SortBy": "IndexNumber",
                     "SortOrder": "Ascending",
@@ -104,7 +104,7 @@ class Jellyfin(MediaPlayer):
                         break
                     
                     for item in items:
-                        for media in item.get("MediaSources", []):
+                        for media in item.get("MediaSources", []) + item.get("MediaStreams", []):
                             path = media.get("Path")
                             if not path:
                                 continue
@@ -138,7 +138,7 @@ class Jellyfin(MediaPlayer):
         sessions = await self._get("/Sessions")
         for session in sessions:
             for item in filter(None, [session.get("NowPlayingItem")]):
-                for media in item.get("MediaSources", []):
+                for media in item.get("MediaSources", []) + item.get("MediaStreams", []):
                     path = media.get("Path")
                     if path:
                         resolved = self.rewriter.on_source(path)
@@ -216,13 +216,13 @@ class Jellyfin(MediaPlayer):
                         "enableResumable": True,
                         "nextUpDateCutoff": cutoff.isoformat(),
                         "disableFirstEpisode": True,
-                        "fields": "MediaSources",
+                        "fields": "MediaSources,MediaStreams",
                     }),
                     self._get(f"/Users/{user_id}/Items/Resume", {
                         "excludeActiveSessions": True,
                         "parentId": library_id,
                         "enableUserData": True,
-                        "fields": "MediaSources",
+                        "fields": "MediaSources,MediaStreams",
                     })
                 ]
                 
@@ -245,7 +245,7 @@ class Jellyfin(MediaPlayer):
                                 "enableUserData": True,
                                 "season": season,
                                 "startIndex": index,
-                                "fields": "MediaSources",
+                                "fields": "MediaSources,MediaStreams",
                                 "sortBy": "SeasonNumber,IndexNumber",
                                 "sortOrder": "Ascending",
                             })).get("Items", [])
@@ -258,7 +258,7 @@ class Jellyfin(MediaPlayer):
                                     lastPlayedAt = max(parse_played_at(ep), lastPlayedAt)
                                     continue
                                 
-                                temp.append({media.get("Path") for media in ep.get("MediaSources", []) if "Path" in media})
+                                temp.append({media.get("Path") for media in ep.get("MediaSources", []) + ep.get("MediaStreams", []) if "Path" in media})
                             
                             season += 1
                             index = 0
@@ -289,6 +289,7 @@ class Jellyfin(MediaPlayer):
                     temp.append(m)
                 
                 result.append((key, temp))
+                
             self.logger.info("[%s] Detected %d watching files in Jellyfin library", self, len(result))
             return result
         
