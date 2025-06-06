@@ -196,7 +196,7 @@ class Jellyfin(MediaPlayer):
     @cached_property
     def __continue_watching(self) -> asyncio.Task[List[Tuple[float,List[Set[str]]]]]:
         cutoff = self.now - timedelta(weeks=1)
-        pq = asyncio.PriorityQueue()
+        pq: asyncio.Queue[Tuple[float, List[str]]] = asyncio.PriorityQueue()
         
         def get_for_user_id(user_id: str, allowed_ids: Set[str]):
             async def get_for_library(library_id):
@@ -207,55 +207,67 @@ class Jellyfin(MediaPlayer):
                         return datetime.fromisoformat(raw_date.replace("Z", "+00:00"))
                     except ValueError:
                          return datetime(1970, 1, 1, tzinfo=timezone.utc)
+                     
+                tasks = [
+                    self._get("/Shows/NextUp", {
+                        "userId": user_id,
+                        "parentId": library_id,
+                        "enableUserData": True,
+                        "enableResumable": True,
+                        "nextUpDateCutoff": cutoff.isoformat(),
+                        "disableFirstEpisode": True,
+                        "fields": "MediaSources",
+                    }),
+                    self._get(f"/Users/{user_id}/Items/Resume", {
+                        "excludeActiveSessions": True,
+                        "parentId": library_id,
+                        "enableUserData": True,
+                        "fields": "MediaSources",
+                    })
+                ]
                 
-                nextup_items = (await self._get("/Shows/NextUp", {
-                    "userId": user_id,
-                    "parentId": library_id,
-                    "enableUserData": True,
-                    "enableResumable": True,
-                    "nextUpDateCutoff": cutoff.isoformat(),
-                    "disableFirstEpisode": True,
-                    "fields": "MediaSources",
-                })).get("Items", [])
-
-                for item in nextup_items:
-                    temp = []
-                    if (series_id := item.get("SeriesId")) is None:
-                        continue
-                    
-                    lastPlayedAt = parse_played_at(item)
-                    season = item.get("SeasonNumber", 1)
-                    index = item.get("IndexNumber", 1) - 1
-
-                    while True:
-                        episodes = (await self._get(f"/Shows/{series_id}/Episodes", {
-                            "userId": user_id,
-                            "enableUserData": True,
-                            "season": season,
-                            "startIndex": index,
-                            "fields": "MediaSources",
-                            "sortBy": "SeasonNumber,IndexNumber",
-                            "sortOrder": "Ascending",
-                        })).get("Items", [])
+                processed_series: Set[str] = set()
+                for task in asyncio.as_completed(tasks):
+                    for item in (await task).get("Items", []):
+                        temp: List[str] = []
+                        if (series_id := item.get("SeriesId")) is None or series_id in processed_series:
+                            continue
                         
-                        if not episodes:
-                            break
+                        processed_series.add(series_id)
                         
-                        for ep in episodes:
-                            if ep.get("UserData", {}).get("Played"):
-                                lastPlayedAt = max(parse_played_at(ep), lastPlayedAt)
-                                continue
+                        lastPlayedAt = parse_played_at(item)
+                        season = item.get("SeasonNumber", 1)
+                        index = item.get("IndexNumber", 1) - 1
+
+                        while True:
+                            episodes = (await self._get(f"/Shows/{series_id}/Episodes", {
+                                "userId": user_id,
+                                "enableUserData": True,
+                                "season": season,
+                                "startIndex": index,
+                                "fields": "MediaSources",
+                                "sortBy": "SeasonNumber,IndexNumber",
+                                "sortOrder": "Ascending",
+                            })).get("Items", [])
                             
-                            temp.append({media.get("Path") for media in ep.get("MediaSources", []) if "Path" in media})
+                            if not episodes:
+                                break
+                            
+                            for ep in episodes:
+                                if ep.get("UserData", {}).get("Played") or ep.get("UserData", {}).get("PlayedPercentage", 0.0) > 80.0:
+                                    lastPlayedAt = max(parse_played_at(ep), lastPlayedAt)
+                                    continue
+                                
+                                temp.append({media.get("Path") for media in ep.get("MediaSources", []) if "Path" in media})
+                            
+                            season += 1
+                            index = 0
                         
-                        season += 1
-                        index = 0
-                    
-                    if lastPlayedAt < cutoff:
-                        continue
-                    
-                    if temp:
-                        await pq.put((-lastPlayedAt.timestamp(), temp))
+                        if lastPlayedAt < cutoff:
+                            continue
+                        
+                        if temp:
+                            await pq.put((-lastPlayedAt.timestamp(), temp))
                 
             return asyncio.gather(*(get_for_library(library_id) for library_id in allowed_ids))
         
@@ -277,7 +289,6 @@ class Jellyfin(MediaPlayer):
                     temp.append(m)
                 
                 result.append((key, temp))
-            
             self.logger.info("[%s] Detected %d watching files in Jellyfin library", self, len(result))
             return result
         
