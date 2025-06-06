@@ -85,10 +85,10 @@ class Qbit(SeedingClient):
         
         asyncio.create_task(wrapper())
 
-    async def get_sort_key(self, path: str) -> Set[Tuple[int, int]]:
+    async def get_sort_key(self, path: str) -> Set[Tuple[float, int, int]]:
         inode = get_stat(path).st_ino
         torrents = await self.__get_torrents(inode)
-        return {(self.now - torrent.completion_on, torrent.num_seeds) for torrent in torrents}
+        return {(torrent.eta or 0, self.now - torrent.completion_on, torrent.num_seeds) for torrent in torrents}
         
     async def pause(self, path: str) -> None:
         inode = get_stat(path).st_ino

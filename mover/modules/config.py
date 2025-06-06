@@ -130,10 +130,10 @@ class MovingMapping:
     def pause(self, path: str) -> asyncio.Future:
         return asyncio.gather(*(qbit.pause(path) for qbit in self.clients))
             
-    async def get_sort_key(self, path: str) -> Tuple[Tuple[int, int, int, int, int, int, float], Dict[str, str]]:
+    async def get_sort_key(self, path: str) -> Tuple[Tuple[int, int, int, float, int, int, int, float], Dict[str, str]]:
         # ignored path, no point checking
         if self.is_ignored(path):
-            return ((1, 0, 0, 0, 0, 0, 0), {})
+            return ((1, 0, 0, 0, 0, 0, 0, 0), {})
         
         qbit_results: List[Tuple[int, int]]
         media_results: List[Tuple[bool, int]]
@@ -143,10 +143,18 @@ class MovingMapping:
             asyncio.gather(*(media.get_sort_key(path) for media in self.media))
         )
 
-        completion_age, num_seeders = min(
-            ((min(a for a, _ in res), min(n for _, n in res)) for res in qbit_results if res),
-            default=(0, 0)
-        )
+        torrent_eta: float = 0
+        completion_age: int = 0
+        num_seeders: int = 0
+        
+        for res in qbit_results:
+            if not res:
+                continue
+            
+            torrent_eta = max(max(eta for eta, _, _ in res), torrent_eta)
+            completion_age = min(min(a for _, a, _ in res), completion_age)
+            num_seeders = min(min(n for _, _, n in res), num_seeders)
+            
         continue_watching, watched_left = any(cw for cw, _ in media_results), sum(wc for _, wc  in media_results)
         
         has_torrent = 1 if qbit_results else 0
@@ -156,6 +164,7 @@ class MovingMapping:
             "continue_watching": str(continue_watching),
             "users_left_to_watch": str(watched_left),
             "num_torrents": str(len(qbit_results)),
+            "torrent_eta": str(torrent_eta),
             "completion_age": f"{timedelta(seconds=completion_age).days}d",
             "num_seeders": str(num_seeders),
             "size": str(format_bytes_to_gib(size)),
@@ -167,11 +176,12 @@ class MovingMapping:
             int(continue_watching), # 2. media un-watched -> 1, watched 0
             watched_left,           # 3. how many users left to watch
             has_torrent,            # 4. has_torrent (0 if has torrents, else 1)
-            -completion_age,        # 5. -completion_age (negative to prioritize older completion age)
-            -num_seeders,           # 6. -num_seeders (negative to prioritize more seeders)
-            len(qbit_results),      # 7. num seeding torrents
-            -size,                  # 8. bigger file goes first
-            get_ctime(path)         # 9. ctime (file creation time as tiebreaker)
+            torrent_eta,            # 5. torrent eta, if any we postpone move, as we do not really need this file anyway soon?
+            -completion_age,        # 6. -completion_age (negative to prioritize older completion age)
+            -num_seeders,           # 7. -num_seeders (negative to prioritize more seeders)
+            len(qbit_results),      # 8. num seeding torrents
+            -size,                  # 9. bigger file goes first
+            get_ctime(path)         # 10. ctime (file creation time as tiebreaker)
         ), metadata)
         
     def within_age_range(self, path: float):

@@ -11,7 +11,7 @@ class SeedingClient(ABC):
         pass
     
     @abstractmethod
-    async def get_sort_key(self, path: str) -> Set[Tuple[int, int]]:
+    async def get_sort_key(self, path: str) -> Set[Tuple[float, int, int]]:
         pass
     
     @abstractmethod
