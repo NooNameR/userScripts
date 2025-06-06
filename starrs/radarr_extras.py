@@ -119,7 +119,7 @@ def http_post(url, data, headers=None):
     
 def try_link(dirs: List[Tuple[str, Callable[[str], str]]], youtube_id: str, retries: int=1, delay: int=0):
     file = check_download_status(youtube_id, retries, delay)
-    if not file:
+    if not file or not os.path.exists(file):
         return False
     
     for (dir, suplier) in dirs:
