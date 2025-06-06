@@ -157,13 +157,13 @@ class MovingMapping:
             
         continue_watching, watched_left = any(cw for cw, _ in media_results), sum(wc for _, wc  in media_results)
         
-        has_torrent = 1 if qbit_results else 0
+        num_torrents = sum(len(t) for t in qbit_results if t)
         size = get_stat(path).st_size
         
         metadata: Dict[str, str] = {
             "continue_watching": str(continue_watching),
             "users_left_to_watch": str(watched_left),
-            "num_torrents": str(len(qbit_results)),
+            "num_torrents": str(num_torrents),
             "torrent_eta": str(torrent_eta),
             "completion_age": f"{timedelta(seconds=completion_age).days}d",
             "num_seeders": str(num_seeders),
@@ -175,11 +175,11 @@ class MovingMapping:
             # age_priority,             # 1. age_priority (0 if within age range, else 1)
             int(continue_watching), # 2. media un-watched -> 1, watched 0
             watched_left,           # 3. how many users left to watch
-            has_torrent,            # 4. has_torrent (0 if has torrents, else 1)
+            int(num_torrents > 0),  # 4. has_torrent (0 if has torrents, else 1)
             torrent_eta,            # 5. torrent eta, if any we postpone move, as we do not really need this file anyway soon?
             -completion_age,        # 6. -completion_age (negative to prioritize older completion age)
             -num_seeders,           # 7. -num_seeders (negative to prioritize more seeders)
-            len(qbit_results),      # 8. num seeding torrents
+            num_torrents,      # 8. num seeding torrents
             -size,                  # 9. bigger file goes first
             get_ctime(path)         # 10. ctime (file creation time as tiebreaker)
         ), metadata)

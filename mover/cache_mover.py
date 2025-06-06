@@ -252,4 +252,4 @@ if __name__ == "__main__":
     finally:
         lock_file.close()
         os.remove(lock_file.name)
-        logging.error("Lock file: %s was removed.", lock_file.name)
+        logging.info("Lock file: %s was removed.", lock_file.name)
