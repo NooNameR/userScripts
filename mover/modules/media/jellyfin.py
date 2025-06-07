@@ -144,7 +144,7 @@ class Jellyfin(MediaPlayer):
                     if path:
                         resolved = self.rewriter.on_source(path)
                         if not os.path.exists(resolved):
-                            resolved = self.rewriter.destination(path)
+                            resolved = self.rewriter.on_destination(path)
                         if os.path.exists(resolved) and os.path.samefile(resolved, file):
                             return True
         return False
