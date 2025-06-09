@@ -2,7 +2,7 @@ import sys
 import os
 import logging
 import asyncio
-import threading
+import re
 from .media_player import MediaPlayer, MediaPlayerType
 from ..rewriter import Rewriter
 from ..helpers import get_stat
@@ -12,6 +12,8 @@ from datetime import datetime, timedelta
 from functools import cached_property
 
 class Plex(MediaPlayer):
+    SUBTITLE_EXTS = tuple(['.srt', '.sub', '.ass'])
+    
     def __init__(self, now: datetime, rewriter: Rewriter, url: str, token: str, libraries: List[str] = [], users: List[str] = []):
         self.now: datetime  = now
         self.rewriter: Rewriter = rewriter
@@ -19,13 +21,21 @@ class Plex(MediaPlayer):
         self.token: str = token
         self.libraries: Set[str] = set(libraries)
         self.users: Set[str] = set(users)
-        self._lock = threading.Lock()
         self.logger = logging.getLogger(__name__)
+        
+    def get_subtitles_for(self, path: str) -> List[str]:
+        base, _ = os.path.splitext(path)
+        directory = os.path.dirname(path)
+        base_name = os.path.basename(base)
+        return [
+            os.path.join(directory, f) 
+            for f in os.listdir(directory) 
+            if f.startswith(base_name) and f.endswith(self.SUBTITLE_EXTS)
+        ]
         
     @cached_property
     def __plex(self):
-        with self._lock:
-            return self.get_plex_server(self.token)
+        return self.get_plex_server(self.token)
     
     @cached_property
     def __plex_servers(self):
@@ -51,10 +61,16 @@ class Plex(MediaPlayer):
                 def __populate(item):
                     for media in item.media:
                         for part in media.parts:
+                            if not part.file:
+                                continue
+                            
                             path = self.rewriter.on_source(part.file)
                             if os.path.exists(path):
                                 self.logger.debug("[%s] Processing %s: %s (%s)", self, item.type, item.title, path)
                                 local_state.add(get_stat(path).st_ino)
+                                
+                                for subtitle in self.get_subtitles_for(path):
+                                    local_state.add(get_stat(subtitle).st_ino)
                                 
                 for item in section.search(unwatched=True):
                     if item.type == 'movie':
@@ -98,8 +114,11 @@ class Plex(MediaPlayer):
                     path = self.rewriter.on_source(part.file)
                     if not os.path.exists(path):
                         path = self.rewriter.on_destination(part.file)
-                    if os.path.exists(path) and os.path.samefile(path, file):
-                        return True
+                    if os.path.exists(path):
+                        return (
+                            os.path.samefile(path, file) or 
+                            any(os.path.samefile(subtitle, file) for subtitle in self.get_subtitles_for(path))
+                        )
             return False
 
         tasks = [asyncio.create_task(check_rating_key(rk)) for rk in self.__active_items()]
@@ -123,13 +142,22 @@ class Plex(MediaPlayer):
     @cached_property
     def __continue_watching_on_source(self) -> asyncio.Task[Set[str]]:
         async def process():
-            return {
-                get_stat(self.rewriter.on_source(path)).st_ino
+            paths = {
+                self.rewriter.on_source(path)
                 for _, bucket in await self.__continue_watching
                 for media in bucket
                 for path in media
                 if os.path.exists(self.rewriter.on_source(path))
             }
+
+            subtitles = {
+                subtitle
+                for path in paths
+                for subtitle in self.get_subtitles_for(path)
+                if os.path.exists(subtitle)
+            }
+
+            return {get_stat(p).st_ino for p in paths | subtitles}
         
         return asyncio.create_task(process())
         
@@ -159,16 +187,20 @@ class Plex(MediaPlayer):
                     if os.path.exists(source_path):
                         continue
                     
-                    detination_path = self.rewriter.on_destination(path)
-                    if not os.path.exists(detination_path):
+                    destination_path = self.rewriter.on_destination(path)
+                    if not os.path.exists(destination_path):
                         continue
-                    await pq.put((key, index, detination_path))
+                    
+                    await pq.put((key, index, destination_path))
+                    for subtitle in self.get_subtitles_for(destination_path):
+                        await pq.put((key, index, subtitle))
+                    
                     total += 1
                 
         self.logger.info("[%s] Detected %d watching files not currently available on source drives in Plex library", self, total)
     
     @cached_property
-    def __continue_watching(self) -> asyncio.Task[List[List[Set[str]]]]:
+    def __continue_watching(self) -> asyncio.Task[List[Tuple[float, List[Set[str]]]]]:
         cutoff = self.now - timedelta(weeks=1)
         pq = asyncio.PriorityQueue()
         
@@ -177,6 +209,7 @@ class Plex(MediaPlayer):
                 part.file
                 for media in item.media
                 for part in media.parts
+                if part.file
             }
 
         async def get_continue_watching(server):
