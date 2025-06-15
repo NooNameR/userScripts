@@ -66,8 +66,9 @@ class Plex(MediaPlayer):
                             
                             path = self.rewriter.on_source(part.file)
                             if os.path.exists(path):
-                                self.logger.debug("[%s] Processing %s: %s (%s)", self, item.type, item.title, path)
-                                local_state.add(get_stat(path).st_ino)
+                                inode = get_stat(path).st_ino
+                                self.logger.debug("[%s] Processing %s: %s ([%d] %s)", self, item.type, item.title, inode, path)
+                                local_state.add(inode)
                                 
                                 for subtitle in self.get_subtitles_for(path):
                                     local_state.add(get_stat(subtitle).st_ino)
@@ -162,7 +163,7 @@ class Plex(MediaPlayer):
         return asyncio.create_task(process())
         
     async def get_sort_key(self, path: str) -> Tuple[bool, int]:
-        inode = get_stat(path)
+        inode = get_stat(path).st_ino
         un_watched, continue_watching = await asyncio.gather(
             self.media,
             self.__continue_watching_on_source
