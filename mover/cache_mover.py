@@ -88,7 +88,7 @@ async def move_to_destination(mapping: MovingMapping) -> int:
     
     sem = asyncio.Semaphore(os.cpu_count() or 4)
     
-    async def enqueue_with_key(src_file):
+    async def enqueue_with_key(src_file) -> None:
         async with sem:
             key, metadata = await mapping.get_sort_key(src_file)
             await pq.put((key, (src_file, metadata)))

@@ -3,15 +3,12 @@ import os
 import shutil
 import logging
 import subprocess
-import threading
 from typing import Dict, Callable
 from datetime import datetime
+from functools import cache
 
-_stat_cache: Dict[str, os.stat_result] = {}
-_age_cache: Dict[str, float] = {}
 _dry_run: bool = False
 _now: datetime = datetime.now()
-_lock: threading.Lock = threading.Lock()
 
 def init(now: datetime, dry_run: bool):
     global _dry_run, _now
@@ -110,20 +107,14 @@ def format_bytes_to_gib(size_bytes: int) -> str:
     gib = size_bytes / (1024 ** 3)
     return f"{gib:.2f} GiB"
 
+@cache
 def get_ctime(file: str) -> float:
-    if file in _age_cache:
-        return _age_cache[file]
-    
     stat = get_stat(file)
-    value = (
+    return (
         getattr(stat, 'st_birthtime', None)
         or __get_birthtime(file)
         or stat.st_ctime
     )
-    
-    with _lock:
-        _age_cache[file] = value 
-    return value
 
 def get_age_str(file: str) -> str:
     created_dt = datetime.fromtimestamp(get_ctime(file))
@@ -144,14 +135,10 @@ def __get_birthtime(filepath) -> float:
         logging.error(f"Error getting birthtime for %s: %s", filepath, e)
         return None
 
+
+@cache
 def get_stat(file: str) -> os.stat_result:
-    if file in _stat_cache:
-        return _stat_cache[file]
-    
-    value = os.stat(file)
-    with _lock:
-        _stat_cache[file] = value
-    return value
+    return os.stat(file)
 
 def execute(callable: Callable[[], None]) -> None:
     if not _dry_run:

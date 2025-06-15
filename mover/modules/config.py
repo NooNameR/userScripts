@@ -179,7 +179,7 @@ class MovingMapping:
             torrent_eta,            # 5. torrent eta, if any we postpone move, as we do not really need this file anyway soon?
             -completion_age,        # 6. -completion_age (negative to prioritize older completion age)
             -num_seeders,           # 7. -num_seeders (negative to prioritize more seeders)
-            num_torrents,      # 8. num seeding torrents
+            num_torrents,           # 8. num seeding torrents
             -size,                  # 9. bigger file goes first
             get_ctime(path)         # 10. ctime (file creation time as tiebreaker)
         ), metadata)
