@@ -23,7 +23,7 @@ class Plex(MediaPlayer):
         self.users: Set[str] = set(users)
         self.logger = logging.getLogger(__name__)
         
-    def get_subtitles_for(self, path: str) -> List[str]:
+    def get_extras_for(self, path: str) -> List[str]:
         base, _ = os.path.splitext(path)
         directory = os.path.dirname(path)
         base_name = os.path.basename(base)
@@ -70,7 +70,7 @@ class Plex(MediaPlayer):
                                 self.logger.debug("[%s] Processing %s: %s ([%d] %s)", self, item.type, item.title, inode, path)
                                 local_state.add(inode)
                                 
-                                for subtitle in self.get_subtitles_for(path):
+                                for subtitle in self.get_extras_for(path):
                                     local_state.add(get_stat(subtitle).st_ino)
                                 
                 for item in section.search(unwatched=True):
@@ -118,7 +118,7 @@ class Plex(MediaPlayer):
                     if os.path.exists(path):
                         return (
                             os.path.samefile(path, file) or 
-                            any(os.path.samefile(subtitle, file) for subtitle in self.get_subtitles_for(path))
+                            any(os.path.samefile(subtitle, file) for subtitle in self.get_extras_for(path))
                         )
             return False
 
@@ -154,7 +154,7 @@ class Plex(MediaPlayer):
             subtitles = {
                 subtitle
                 for path in paths
-                for subtitle in self.get_subtitles_for(path)
+                for subtitle in self.get_extras_for(path)
                 if os.path.exists(subtitle)
             }
 
@@ -193,7 +193,7 @@ class Plex(MediaPlayer):
                         continue
                     
                     await pq.put((key, index, destination_path))
-                    for subtitle in self.get_subtitles_for(destination_path):
+                    for subtitle in self.get_extras_for(destination_path):
                         await pq.put((key, index, subtitle))
                     
                     total += 1
@@ -231,12 +231,17 @@ class Plex(MediaPlayer):
                     if not should_skip(item):
                         await pq.put((-item.lastViewedAt.timestamp(), [__populate_watching(item)]))
                 elif item.type == 'episode':
+                    lastViewedAt = item.lastViewedAt
                     show = item.show()
-                    key = (item.seasonNumber, item.index + 1) if item.isWatched else (item.seasonNumber, item.index)
                     temp: List[Set[str]] = []
-                    for episode in sorted([e for e in show.episodes() if (e.seasonNumber, e.index) >= key], key=lambda e: (e.seasonNumber, e.index)):
+                    for episode in sorted(show.episodes(), key=lambda e: (e.seasonNumber, e.index)):
+                        if should_skip(episode):
+                            temp = []
+                            lastViewedAt = max(lastViewedAt, episode.lastViewedAt)
+                            continue
+                            
                         temp.append(__populate_watching(episode))
-                    await pq.put((-item.lastViewedAt.timestamp(), temp))
+                    await pq.put((-lastViewedAt.timestamp(), temp))
         
         async def process() -> List[Tuple[float, List[Set[str]]]]:
             await asyncio.gather(*(get_continue_watching(server) for server in self.__plex_servers))

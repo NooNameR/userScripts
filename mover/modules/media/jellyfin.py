@@ -258,6 +258,7 @@ class Jellyfin(MediaPlayer):
                             
                             for ep in episodes:
                                 if ep.get("UserData", {}).get("Played") or ep.get("UserData", {}).get("PlayedPercentage", 0.0) > 40.0:
+                                    temp = []
                                     lastPlayedAt = max(parse_played_at(ep), lastPlayedAt)
                                     continue
                                 
