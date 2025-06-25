@@ -59,13 +59,16 @@ class MovingMapping:
     async def needs_moving(self) -> int:
         total, used, _ = shutil.disk_usage(self.source)
         percent_used = round((used / total) * 100, 4)
-        threshold_bytes = used - int(total * (self.threshold / 100))
+        threshold_bytes = used - (total * (self.threshold / 100))
+        
         
         if threshold_bytes > 0:
+            threshold_bytes = max(threshold_bytes, total * 0.05)
+            
             await asyncio.gather(*(client.scan(self.source) for client in self.clients))
             
             self.logger.debug("Space usage: %.4g%% is above moving threshold: %.4g%%. Starting %s...", percent_used, self.threshold, self.source)
-            return threshold_bytes
+            return int(threshold_bytes)
         
         self.logger.info("Space usage: %.4g%% is below moving threshold: %.4g%%. Skipping %s...", percent_used, self.threshold, self.source)
         return 0
