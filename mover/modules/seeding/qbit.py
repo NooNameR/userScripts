@@ -11,7 +11,7 @@ from ..helpers import execute, get_stat
 from datetime import datetime
 
 class Qbit(SeedingClient):
-    def __init__(self, now: datetime, rewriter: Rewriter, host: str, user: str, password: str):
+    def __init__(self, now: datetime, rewriter: Rewriter, host: str, user: str = "", password: str = ""):
         self.now = now.timestamp()
         self.rewriter: Rewriter = rewriter
         self.host: str = host
