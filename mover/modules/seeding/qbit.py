@@ -99,18 +99,22 @@ class Qbit(SeedingClient):
                 continue
             
             self.logger.info("[%s] [%s] Pausing torrent: %s [%d] -> %s", self, torrent.hash, torrent.name, torrent.added_on, torrent.content_path)
-            execute(torrent.pause)
+            execute(lambda: self.__pause(torrent))
             self.paused_torrents.append(torrent)
     
     async def resume(self) -> None:
         while self.paused_torrents:
             torrent = self.paused_torrents.pop()
             self.logger.info("[%s] [%s] Resuming torrent: %s [%d] -> %s", self, torrent.hash, torrent.name, torrent.added_on, torrent.content_path)
-            execute(self.__resume)
+            execute(lambda: self.__resume(torrent))
     
-    @retry(stop_max_attempt_number=5, wait_exponential_multiplier=10000, wait_exponential_max=60000)
+    @retry(stop_max_attempt_number=10, wait_exponential_multiplier=10000, wait_exponential_max=60000)
     def __resume(self, torrent) -> None:
         torrent.resume()
+        
+    @retry(stop_max_attempt_number=5, wait_exponential_multiplier=10000, wait_exponential_max=60000)
+    def __pause(self, torrent) -> None:
+        torrent.pause()
             
     async def aclose(self) -> None:
         await self.resume()
