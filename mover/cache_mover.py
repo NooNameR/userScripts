@@ -34,7 +34,7 @@ async def move_files(mapping: MovingMapping, files: Iterable[Tuple[str, Dict[str
             logging.info("Skipping file, currently is being actively used: %s", src_file)
             continue
         
-        logging.debug("Processing file: %s | Remaining bytes to move: %s", src_file, helpers.format_bytes_to_gib(remaining))
+        logging.info("Processing file: %s | Remaining bytes to move: %s", src_file, helpers.format_bytes_to_gib(remaining))
         
         stat = helpers.get_stat(src_file)
     
