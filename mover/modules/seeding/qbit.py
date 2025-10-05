@@ -7,6 +7,7 @@ from ..rewriter import Rewriter
 from .seeding_client import SeedingClient
 from typing import Tuple, Set
 from collections import defaultdict
+from retrying import retry
 from ..helpers import execute, get_stat
 from datetime import datetime
 
@@ -100,12 +101,16 @@ class Qbit(SeedingClient):
             self.logger.info("[%s] [%s] Pausing torrent: %s [%d] -> %s", self, torrent.hash, torrent.name, torrent.added_on, torrent.content_path)
             execute(torrent.pause)
             self.paused_torrents.append(torrent)
-        
+    
     async def resume(self) -> None:
         while self.paused_torrents:
             torrent = self.paused_torrents.pop()
             self.logger.info("[%s] [%s] Resuming torrent: %s [%d] -> %s", self, torrent.hash, torrent.name, torrent.added_on, torrent.content_path)
-            execute(torrent.resume)
+            execute(self.__resume)
+    
+    @retry(stop_max_attempt_number=5, wait_exponential_multiplier=10000, wait_exponential_max=60000)
+    def __resume(self, torrent) -> None:
+        torrent.resume()
             
     async def aclose(self) -> None:
         await self.resume()
