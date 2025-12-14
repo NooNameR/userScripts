@@ -1,6 +1,29 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+HC_BASE_URL="${1:-}"
+HC_UUID="${2:-}"
+
+if [[ -n "${HC_BASE_URL}" && -n "${HC_UUID}" ]]; then
+  HC_URL="${HC_BASE_URL%/}/ping/${HC_UUID}"
+  HC_LOG="${HC_URL}/log"
+  HC_ENABLED=true
+else
+  HC_ENABLED=false
+fi
+
+# ---- healthchecks failure + start ----
+if [[ "${HC_ENABLED}" == true ]]; then
+  trap 'ec=$?; curl -fsS "${HC_URL}/fail?exit=${ec}" || true; exit $ec' ERR
+  curl -fsS "${HC_URL}/start" || true
+fi
+
+# ---- healthchecks log helper (log only) ----
+hc_log() {
+  [[ "${HC_ENABLED}" == true ]] || return 0
+  printf '%s\n' "$1" | curl -fsS --data-binary @- "${HC_LOG}" || true
+}
+
 # ---- paths ----
 BASE_DIR="/opt/mover"
 VENV_DIR="${BASE_DIR}/mover/venv"
@@ -20,7 +43,7 @@ log() {
 
 # ---- sanity checks ----
 [[ -f "${SCRIPT}" ]] || { echo "ERROR: cache_mover.py not found"; exit 1; }
-[[ -f "${REQS}" ]]   || { echo "ERROR: requirements.txt not found"; exit 1; }
+[[ -f "${REQS}" ]] || { echo "ERROR: requirements.txt not found"; exit 1; }
 [[ -f "${CONFIGFILE}" ]] || { echo "ERROR: config.yml not found"; exit 1; }
 
 # ---- ensure runtime paths ----
@@ -38,12 +61,16 @@ fi
 
 # ---- run mover ----
 log "Starting cache mover"
+hc_log "cache mover started"
 
 "${VENV_DIR}/bin/python" "${SCRIPT}" \
   --config "${CONFIGFILE}" \
   --log-file "/var/log/cache_mover.log" \
   --lock-file "${LOCKFILE}"
 
+hc_log "cache mover finished"
+
+# ---- fclones ----
 folders=(
   "torrents/en/tv|media/tv"
   "torrents/en/tv|torrents/en/cross-seed"
@@ -64,17 +91,36 @@ folders=(
   "torrents/ua/tv|torrents/ua/cross-seed"
 )
 
+hc_log "fclones started"
+
 for pair in "${folders[@]}"; do
-    IFS="|" read -r src dst <<< "${pair}"
+  IFS="|" read -r src dst <<< "${pair}"
 
-    log "fclones started: ${src} <-> ${dst}"
+  log "fclones started: ${src} <-> ${dst}"
 
-    result=$(/usr/bin/fclones group --one-fs --hidden --follow-links $DATA_DIR/$src $DATA_DIR/$dst | /usr/bin/fclones link)
+  /usr/bin/fclones group \
+    --one-fs \
+    --hidden \
+    --follow-links \
+    "${DATA_DIR}/${src}" \
+    "${DATA_DIR}/${dst}" \
+  | /usr/bin/fclones link
 
-    log "fclones finished: ${src} <-> ${dst}"
+  log "fclones finished: ${src} <-> ${dst}"
 done
+
+hc_log "fclones finished"
 
 # ---- SnapRAID ----
 log "Starting SnapRAID"
+hc_log "snapraid started"
+
 /usr/bin/snapraid-daily
+
 log "SnapRAID completed"
+hc_log "snapraid completed"
+
+# ---- healthchecks success ----
+if [[ "${HC_ENABLED}" == true ]]; then
+  curl -fsS "${HC_URL}" || true
+fi
