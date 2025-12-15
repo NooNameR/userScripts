@@ -111,15 +111,6 @@ done
 
 hc_log "fclones finished"
 
-# ---- SnapRAID ----
-log "Starting SnapRAID"
-hc_log "snapraid started"
-
-/usr/bin/snapraid-daily
-
-log "SnapRAID completed"
-hc_log "snapraid completed"
-
 # ---- healthchecks success ----
 if [[ "${HC_ENABLED}" == true ]]; then
   curl -fsS "${HC_URL}" || true
