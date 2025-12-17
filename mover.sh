@@ -25,12 +25,13 @@ hc_log() {
 }
 
 # ---- paths ----
-BASE_DIR="/opt/mover"
-VENV_DIR="${BASE_DIR}/mover/venv"
+BASE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+RUNTIME_DIR="/var/lib/mover"
+VENV_DIR="${RUNTIME_DIR}/venv"
 SCRIPT="${BASE_DIR}/mover/cache_mover.py"
 REQS="${BASE_DIR}/mover/requirements.txt"
 
-CONFIGFILE="/etc/mover/config.yml"
+CONFIGFILE="${3:-/etc/mover/config.yml}"
 LOGFILE="/var/log/mover.log"
 LOCKFILE="/var/run/mover.pid"
 
@@ -98,13 +99,13 @@ for pair in "${folders[@]}"; do
 
   log "fclones started: ${src} <-> ${dst}"
 
-  /usr/bin/fclones group \
+  fclones group \
     --one-fs \
     --hidden \
     --follow-links \
     "${DATA_DIR}/${src}" \
     "${DATA_DIR}/${dst}" \
-  | /usr/bin/fclones link
+  | fclones link
 
   log "fclones finished: ${src} <-> ${dst}"
 done
