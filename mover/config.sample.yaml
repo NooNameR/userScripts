@@ -19,8 +19,8 @@ mappings:
     # qbit clients
     clients:
       - host: localhost:8080
-        user: !ENV QBIT_USER
-        password: !ENV QBIT_PASSWORD
+        user: !ENV ${QBIT_USER}
+        password: !ENV ${QBIT_PASSWORD}
         # we need to be able to match host path with container path
         rewrite:
           # container mount point for qbit
@@ -29,7 +29,7 @@ mappings:
           to: "/mnt/data-cache/data"
     plex:
       - url: http://localhost:32400
-        token: !ENV PLEX_TOKEN
+        token: !ENV ${PLEX_TOKEN}
         # we need to be able to match host path with container path
         rewrite:
           # container mount point for plex
@@ -46,7 +46,7 @@ mappings:
           - "username_2"
     jellyfin:
       - url: http://localhost:8096
-        api_key: !ENV JELLYFIN_API_KEY
+        api_key: !ENV ${JELLYFIN_API_KEY}
         # we need to be able to match host path with container path
         rewrite:
           # container mount point for plex
@@ -70,7 +70,7 @@ mappings:
   - source: "/mnt/app-cache/documents"
     destination: "/mnt/rusty/documents"
     min_age: "3d"
-  # XFS cache -> Unraid Array 
+  # XFS cache -> Unraid Array
   - source: "/mnt/other-cache/share1"
     destination: "/mnt/user0/share1"
     min_age: "3d"
